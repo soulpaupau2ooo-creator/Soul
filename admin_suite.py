@@ -106,7 +106,7 @@ async def web_admin_dashboard_handler(request: web.Request) -> web.Response:
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
-    <title>Soulbekbot - Web Admin Panel</title>
+    <title>Mustaqil Ish Bot - Web Admin Panel</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 30px; }}
         .container {{ max-width: 900px; margin: 0 auto; }}
@@ -124,7 +124,7 @@ async def web_admin_dashboard_handler(request: web.Request) -> web.Response:
     <div class="container">
         <div class="header">
             <div>
-                <h1>🤖 Soulbekbot Dashboard</h1>
+                <h1>🤖 Mustaqil Ish Bot Dashboard</h1>
                 <p style="color: #94a3b8; margin: 5px 0 0 0;">24/7 Monitoring va Boshqaruv Tizimi</p>
             </div>
             <span class="status-badge">● LIVE TIZIM</span>
@@ -155,7 +155,7 @@ async def web_admin_dashboard_handler(request: web.Request) -> web.Response:
         </div>
 
         <div class="footer">
-            &copy; 2026 Soulbekbot Inc. Barcha huquqlar himoyalangan.
+            &copy; 2026 Mustaqil Ish Bot. Barcha huquqlar himoyalangan.
         </div>
     </div>
 </body>
