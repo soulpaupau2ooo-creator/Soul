@@ -636,6 +636,9 @@ async def inline_search_handler(inline_query: types.InlineQuery):
     query = (inline_query.query or "").strip().lower()
     results = []
     
+    bot_info = await inline_query.bot.get_me()
+    bot_username = bot_info.username or "mustaqil_ish_S_bot"
+    
     count = 0
     for subj_id, data in knowledge_base.items():
         title = data["title"]
@@ -648,7 +651,7 @@ async def inline_search_handler(inline_query: types.InlineQuery):
                         message_text=(
                             f"📚 *Fan:* {title}\n"
                             f"📝 *Mavzu:* {topic}\n\n"
-                            f"Ushbu mavzu bo'yicha to'liq mustaqil ish tayyorlash uchun @Soulbekbot ga kiring!"
+                            f"Ushbu mavzu bo'yicha to'liq mustaqil ish tayyorlash uchun @{bot_username} ga kiring!"
                         ),
                         parse_mode="Markdown"
                     ),
