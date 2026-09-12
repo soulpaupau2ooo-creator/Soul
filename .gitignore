@@ -1,0 +1,7 @@
+.env
+venv/
+__pycache__/
+*.pyc
+users_db.json
+.system_generated/
+scratch/
