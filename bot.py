@@ -48,12 +48,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("Soulbekbot")
 
 class BotStates(StatesGroup):
-    waiting_for_custom_topic = State()
-    waiting_for_problem_solve = State()
-    waiting_for_teacher_topic = State()
-    waiting_for_proofread_text = State()
-    waiting_for_summary_text = State()
-    waiting_for_feedback = State()
+    in_problem_mode = State()      # Persistent problem solving & questions
+    in_custom_essay_mode = State() # Persistent essay writing
+    in_teacher_mode = State()      # Persistent teacher Q&A
+    in_proofread_mode = State()    # Persistent proofreading
+    in_feedback_mode = State()     # Feedback
 
 # In-memory storage for TTS audio generation of essays
 last_generated_essays: Dict[int, str] = {}
@@ -102,9 +101,18 @@ def get_main_reply_menu() -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Kerakli bo'limni tanlang...")
 
-def get_back_reply_menu() -> ReplyKeyboardMarkup:
-    kb = [[KeyboardButton(text="⬅️ Asosiy menyu")]]
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Asosiy menyuga qaytish...")
+def get_back_only_menu() -> ReplyKeyboardMarkup:
+    kb = [[KeyboardButton(text="⬅️ Orqaga")]]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Chiqish uchun 'Orqaga' bosing...")
+
+def get_start_language_inline() -> InlineKeyboardMarkup:
+    kb = [
+        [InlineKeyboardButton(text="🇺🇿 O'zbekcha (Lotin)", callback_data="firstlang_uz")],
+        [InlineKeyboardButton(text="🇷🇺 Русский язык", callback_data="firstlang_ru")],
+        [InlineKeyboardButton(text="🇬🇧 English", callback_data="firstlang_en")],
+        [InlineKeyboardButton(text="🇺🇿 Ўзбекча (Кирилл)", callback_data="firstlang_uz_cyr")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_main_menu() -> InlineKeyboardMarkup:
     kb = [[InlineKeyboardButton(text=cat_data["title"], callback_data=f"cat_{cat_id}")] for cat_id, cat_data in categories.items()]
@@ -133,9 +141,9 @@ def get_chart_selection_menu() -> InlineKeyboardMarkup:
 def get_languages_menu() -> InlineKeyboardMarkup:
     kb = [
         [InlineKeyboardButton(text="🇺🇿 O'zbekcha (Lotin)", callback_data="setlang_uz")],
-        [InlineKeyboardButton(text="🇺🇿 Ўзбекча (Кирилл)", callback_data="setlang_uz_cyr")],
         [InlineKeyboardButton(text="🇷🇺 Русский язык", callback_data="setlang_ru")],
-        [InlineKeyboardButton(text="🇬🇧 English", callback_data="setlang_en")]
+        [InlineKeyboardButton(text="🇬🇧 English", callback_data="setlang_en")],
+        [InlineKeyboardButton(text="🇺🇿 Ўзбекча (Кирилл)", callback_data="setlang_uz_cyr")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -185,7 +193,6 @@ async def start_web_server():
 # ==============================================================================
 async def request_ai_content(prompt: str) -> str:
     """Asynchronous AI request with robust round-robin API Key rotation and LRU caching."""
-    # Check In-Memory Cache first to save Gemini API requests
     cache_key = prompt.strip()
     if cache_key in essay_cache:
         logger.info("⚡ Javob keshdan olindi (Cache Hit)!")
@@ -209,7 +216,6 @@ async def request_ai_content(prompt: str) -> str:
                 raise ValueError("Bosh javob olindi.")
                 
             result_text = response.text
-            # Store in cache
             essay_cache[cache_key] = result_text
             return result_text
             
@@ -230,30 +236,27 @@ async def request_ai_content(prompt: str) -> str:
 async def generate_essay(message: types.Message, subject: str, topic: str) -> None:
     user_id = message.from_user.id if message.from_user else 0
     if not API_KEYS:
-        await message.answer("⚠️ Kechirasiz, botning Sun'iy Intelekt qismi (Brain) ulanmagan. Iltimos, ma'muriyatga xabar bering.")
+        await message.answer("⚠️ Sun'iy Intelekt qismi (Brain) ulanmagan. Iltimos, ma'muriyatga xabar bering.")
         return
         
-    wait_msg = await message.answer(f"⏳ *{subject}* fani bo'yicha *\"{topic}\"* mavzusida mukammal va qisqa mustaqil ish tayyorlanmoqda...\n\n_Iltimos, ozroq kuting..._", parse_mode="Markdown")
+    wait_msg = await message.answer(f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida qisqa va lo'nda mustaqil ish tayyorlanmoqda...", parse_mode="Markdown")
     
     lang = await db.get_user_language(user_id) if user_id else "uz"
     prompt = (
-        f"Sen iqtisodiyot professori rolidasan. "
-        f"Menga {subject} fani bo'yicha '{topic}' mavzusida qisqa, lo'nda va juda ma'noli mustaqil ish yozib ber. "
-        f"Qoidalar:\n"
-        f"1. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Ўзбекча (Кирилл)' if lang == 'uz_cyr' else 'Русский язык' if lang == 'ru' else 'English'}.\n"
-        f"2. Matn hajmi qisqa bo'lsin (taxminan 1000-1500 belgi), ortiqcha suv gaplarsiz, faqat eng muhim faktlar va mohiyat ochib berilsin.\n"
-        f"3. Tuzilishi: Qisqacha kirish, 1-2 ta eng asosiy fikr/tahlil va aniq xulosa.\n"
-        f"4. MUHIM: Hech qanday maxsus belgilarsiz (yulduzcha *, tagchiziq _ va qalin harflar) mutlaqo oddiy matn ko'rinishida yozing, chunki Telegram qabul qilolmaydi."
+        f"Foydalanuvchiga '{subject}' fani bo'yicha '{topic}' mavzusida qisqa, tushunarli va lo'nda mustaqil ish yozib ber.\n\n"
+        f"Qat'iy talablar:\n"
+        f"1. Hajmi: Qisqa va lo'nda (800-1200 belgi), ortiqcha gaplarsiz, faqat eng muhim asosiy tushunchalar.\n"
+        f"2. Hech qanday salomlashish yoki ortiqcha kirish gaplarsiz to'g'ridan-to'g'ri mohiyatdan boshla.\n"
+        f"3. MUHIM: Hech qanday *, #, _, ** kabi maxsus belgilarsiz mutlaqo oddiy toza matn bo'lsin.\n"
+        f"4. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Ўзбекча (Кирилл)' if lang == 'uz_cyr' else 'Русский язык' if lang == 'ru' else 'English'}."
     )
     
     try:
         text = await request_ai_content(prompt)
         
-        # Save in memory for TTS audio
         if user_id:
             last_generated_essays[user_id] = text
         
-        # Log to Database
         if message.from_user:
             await db.log_request(
                 user_id=message.from_user.id,
@@ -261,7 +264,6 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
                 topic=topic
             )
         
-        # Safe Telegram message sending (max 4096 chars per message)
         if len(text) > 4000:
             parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
             for part in parts:
@@ -272,14 +274,14 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
         await wait_msg.delete()
         
     except ValueError as ve:
-        await wait_msg.edit_text("⚠️ Kechirasiz, AI ulanishida uzilish yuz berdi. Iltimos, kalitlarni tekshiring.")
+        await wait_msg.edit_text("⚠️ AI ulanishida uzilish yuz berdi. Iltimos, keyinroq urinib ko'ring.")
         logger.error(f"Value Error: {ve}")
     except Exception as e:
         error_str = str(e).lower()
         if "429" in error_str or "quota" in error_str:
-            await wait_msg.edit_text("⏳ Uzr, ayni vaqtda botdan juda ko'p foydalanilayotgani sababli barcha serverlar band bo'lib qoldi.\n\nIltimos, 1 daqiqadan so'ng qayta urinib ko'ring.")
+            await wait_msg.edit_text("⏳ Serverlar band. Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring.")
         else:
-            await wait_msg.edit_text("⚠️ Kechirasiz, matnni tayyorlashda texnik xatolik yuz berdi.\n\nIltimos, boshqa mavzu tanlab ko'ring.")
+            await wait_msg.edit_text("⚠️ Texnik xatolik yuz berdi. Iltimos, boshqa mavzu tanlab ko'ring.")
         logger.error(f"Unhandled Exception: {e}")
 
 # ==============================================================================
@@ -290,11 +292,9 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
     await state.clear()
     uid = message.from_user.id if message.from_user else 0
     
-    # Check Anti-Spam
     if is_rate_limited(uid):
         return
         
-    # Check Blacklist
     if await db.is_banned(uid):
         await message.answer("🚫 Siz botdan foydalanishdan chetlashtirilgansiz.")
         return
@@ -309,7 +309,7 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
                 try:
                     await message.bot.send_message(
                         chat_id=inviter_id,
-                        text=f"🎉 Sizning havolangiz orqali yangi do'stingiz ({message.from_user.full_name}) botga qo'shildi! Sizga +10 ball berildi."
+                        text=f"🎉 Yangi do'stingiz ({message.from_user.full_name}) botga qo'shildi! Sizga +10 ball berildi."
                     )
                 except Exception:
                     pass
@@ -324,76 +324,102 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
             username=message.from_user.username
         )
         
+    # First step: Clean Language Selection
     welcome_text = (
         f"Assalomu alaykum, {message.from_user.full_name}!\n\n"
-        "O'zbekistondagi barcha nufuzli OTMlar o'quv dasturi asosidagi **Akademik AI Assistent**ga xush kelibsiz!\n\n"
-        "✨ *Imkoniyatlarimiz:*\n"
-        "• 📚 Mustaqil ishlar generatsiyasi (Lotin/Kirill/Rus/Ingliz)\n"
-        "• 🧮 Iqtisodiy masalalarni yechish (Matn va Rasm orqali)\n"
-        "• 📊 Talab-Taklif, YaIM va Fillips grafiklarini chizish\n"
-        "• 🎧 Mustaqil ishni audio qilib eshitish (Audiobook)\n"
-        "• 🎓 O'qituvchi savollariga tayyorlovchi simulyator\n"
-        "• 🎤 Ovozli xabar orqali mavzu aytish\n\n"
-        "Kerakli bo'limni tanlang:"
+        "Iltimos, o'zingizga qulay tilni tanlang:\n"
+        "Пожалуйста, выберите язык:\n"
+        "Please choose your language:"
     )
-    await message.answer(welcome_text, reply_markup=get_main_reply_menu(), parse_mode="Markdown")
+    await message.answer(welcome_text, reply_markup=get_start_language_inline())
 
-@dp.message(F.text == "⬅️ Asosiy menyu")
+@dp.callback_query(F.data.startswith("firstlang_"))
+async def first_language_callback(callback: types.CallbackQuery):
+    lang_code = callback.data.replace("firstlang_", "")
+    uid = callback.from_user.id
+    await db.set_user_language(uid, lang_code)
+    await callback.answer("Til tanlandi!")
+    
+    lang_names = {
+        "uz": "O'zbekcha (Lotin)",
+        "uz_cyr": "Ўзбекча (Кирилл)",
+        "ru": "Русский язык",
+        "en": "English"
+    }
+    chosen = lang_names.get(lang_code, "O'zbekcha")
+    
+    text = (
+        f"✅ Til: *{chosen}*\n\n"
+        "O'zbekistondagi nufuzli OTMlar o'quv dasturi asosidagi **Akademik AI Assistent**ga xush kelibsiz!\n\n"
+        "Quyidagi bo'limlardan birini tanlang:"
+    )
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.message.answer(text, reply_markup=get_main_reply_menu(), parse_mode="Markdown")
+
+@dp.message(F.text == "⬅️ Orqaga")
 async def back_to_main_reply(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("🏠 Asosiy menyudasiz. Quyidagilardan birini tanlang:", reply_markup=get_main_reply_menu())
+    await message.answer("🏠 Asosiy menyudasiz. Quyidagi bo'limlardan birini tanlang:", reply_markup=get_main_reply_menu())
 
 # --- 📚 1. Mustaqil Ish Bo'limi ---
 @dp.message(F.text == "📚 Mustaqil ish yozish")
 async def btn_mustaqil_ish_handler(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
-    text = "Ajoyib! Endi o'zingizga kerakli Iqtisodiyot yo'nalishini tanlang:"
+    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_only_menu())
+    text = "Ajoyib! O'zingizga kerakli Iqtisodiyot yo'nalishini tanlang:"
     await message.answer(text, reply_markup=get_main_menu())
 
-# --- 🧮 2. Masala Yechish Bo'limi ---
+# --- 🧮 2. Masala va Savol-Javob Bo'limi (Davomiy Rejim) ---
 @dp.message(F.text == "🧮 Masala yechish")
 async def btn_problem_solve_handler(message: types.Message, state: FSMContext) -> None:
-    await state.set_state(BotStates.waiting_for_problem_solve)
-    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
+    await state.set_state(BotStates.in_problem_mode)
+    await message.answer("Bo'lim ochildi...", reply_markup=get_back_only_menu())
     await message.answer(
-        "🧮 *Iqtisodiy Masalalar Kalkulyatori*\n\n"
-        "Iqtisodiyotga oid istalgan masalangizni matn ko'rinishida yozib yuboring yoki **daftardagi/kitobdagi rasmini tashlang**!\n\n"
-        "_Masalan: \"Bozorda talab funksiyasi Qd = 100 - 2P, taklif Qs = 10 + 4P bo'lsa, muvozanat narxi va hajmini toping.\"_",
+        "🧮 *Iqtisodiy Masala va Savol-Javob Bo'limidasiz*\n\n"
+        "Iqtisodiyotga oid istalgan masalangizni yoki savolingizni yozib yuboring (yoki daftardagi rasmini tashlang).\n\n"
+        "💡 *Bu bo'limda ketma-ket istagancha savol berishingiz mumkin!* Bot har biriga javob beradi.\n"
+        "Chiqish uchun pastdagi *\"⬅️ Orqaga\"* tugmasini bosing.",
         parse_mode="Markdown"
     )
 
-@dp.message(BotStates.waiting_for_problem_solve, F.text)
-async def problem_text_handler(message: types.Message, state: FSMContext) -> None:
+@dp.message(BotStates.in_problem_mode, F.text)
+async def problem_continuous_text_handler(message: types.Message, state: FSMContext) -> None:
+    if message.text == "⬅️ Orqaga":
+        await state.clear()
+        await message.answer("🏠 Asosiy menyudasiz.", reply_markup=get_main_reply_menu())
+        return
+
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
-    wait_msg = await message.answer("⏳ Masala tahlil qilinmoqda va yechilmoqda...")
+    wait_msg = await message.answer("⏳ Javob tayyorlanmoqda...")
     solution = await solve_economic_problem(message.text, lang=lang)
-    await state.clear()
     await wait_msg.delete()
-    await message.answer(solution, reply_markup=get_main_reply_menu())
+    # DO NOT CLEAR STATE! User can keep asking!
+    await message.answer(solution, reply_markup=get_back_only_menu())
 
 # --- 📸 3. Rasm orqali masala yechish (Gemini Vision OCR) ---
 @dp.message(F.photo)
 async def photo_message_handler(message: types.Message, bot: Bot, state: FSMContext) -> None:
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
-    photo = message.photo[-1]  # Get highest resolution
-    wait_msg = await message.answer("📸 Rasm qabul qilindi! Sun'iy Intellekt masalani o'qib, yechishni boshladi...")
+    photo = message.photo[-1]
+    wait_msg = await message.answer("📸 Rasm qabul qilindi! Masala o'qilib, qisqa va lo'nda yechim tayyorlanmoqda...")
     solution = await process_photo_problem(bot, photo, lang=lang)
-    await state.clear()
     await wait_msg.delete()
-    await message.answer(solution, reply_markup=get_main_reply_menu())
+    await message.answer(solution, reply_markup=get_back_only_menu())
 
 # --- 🎤 4. Ovozli xabar orqali mavzu qabul qilish ---
 @dp.message(F.voice)
 async def voice_message_handler(message: types.Message, bot: Bot) -> None:
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
-    wait_msg = await message.answer("🎙 Ovozli xabaringiz eshitilmoqda va matnga aylantirilmoqda...")
+    wait_msg = await message.answer("🎙 Ovozli xabaringiz eshitilmoqda...")
     result = await process_voice_topic(bot, message.voice, lang=lang)
     await wait_msg.delete()
-    await message.answer(result, reply_markup=get_main_reply_menu())
+    await message.answer(result, reply_markup=get_back_only_menu())
 
 # --- 📊 5. Iqtisodiy Grafiklar Bo'limi ---
 @dp.message(F.text == "📊 Iqtisodiy grafiklar")
@@ -423,52 +449,62 @@ async def chart_callback_handler(callback: types.CallbackQuery):
     
     await callback.message.answer_photo(
         photo=file_obj,
-        caption=f"📈 *{title}*\n\nUshbu diagrammani bemalol mustaqil ishingizga yoki taqdimotingizga qo'yishingiz mumkin.",
+        caption=f"📈 *{title}*",
         parse_mode="Markdown"
     )
 
-# --- 🎓 6. O'qituvchi Savollari (Simulyator) ---
+# --- 🎓 6. O'qituvchi Savollari (Davomiy Rejim) ---
 @dp.message(F.text == "🎓 O'qituvchi savollari")
 async def btn_teacher_handler(message: types.Message, state: FSMContext) -> None:
-    await state.set_state(BotStates.waiting_for_teacher_topic)
-    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
+    await state.set_state(BotStates.in_teacher_mode)
+    await message.answer("Bo'lim ochildi...", reply_markup=get_back_only_menu())
     await message.answer(
         "🎓 *O'qituvchi bilan Suhbat Trenajyori*\n\n"
-        "O'qituvchingizga qaysi mavzudan javob bermoqchisiz? Mavzuni yozing:\n"
-        "Bot o'qituvchi berishi mumkin bo'lgan qiyin savollarni va namunali javoblarni chiqarib beradi!",
+        "Qaysi mavzudan imtihonga yoki darsga tayyorlanmoqchisiz? Mavzuni yozing:\n"
+        "Bot o'qituvchi berishi mumkin bo'lgan 3 ta qiyin savol va qisqa javoblarni chiqaradi.\n\n"
+        "💡 *Bu bo'limda ketma-ket turli mavzularni yozishingiz mumkin!*",
         parse_mode="Markdown"
     )
 
-@dp.message(BotStates.waiting_for_teacher_topic, F.text)
-async def teacher_topic_handler(message: types.Message, state: FSMContext) -> None:
+@dp.message(BotStates.in_teacher_mode, F.text)
+async def teacher_continuous_handler(message: types.Message, state: FSMContext) -> None:
+    if message.text == "⬅️ Orqaga":
+        await state.clear()
+        await message.answer("🏠 Asosiy menyudasiz.", reply_markup=get_main_reply_menu())
+        return
+
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
-    wait_msg = await message.answer("⏳ O'qituvchi berishi mumkin bo'lgan savollar tayyorlanmoqda...")
+    wait_msg = await message.answer("⏳ Savollar tayyorlanmoqda...")
     questions = await generate_teacher_questions(message.text, lang=lang)
-    await state.clear()
     await wait_msg.delete()
-    await message.answer(questions, reply_markup=get_main_reply_menu())
+    await message.answer(questions, reply_markup=get_back_only_menu())
 
-# --- ✍️ 7. Matn Tahrirlash Bo'limi ---
+# --- ✍️ 7. Matn Tahrirlash (Davomiy Rejim) ---
 @dp.message(F.text == "✍️ Matn tahrirlash")
 async def btn_proofread_handler(message: types.Message, state: FSMContext) -> None:
-    await state.set_state(BotStates.waiting_for_proofread_text)
-    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
+    await state.set_state(BotStates.in_proofread_mode)
+    await message.answer("Bo'lim ochildi...", reply_markup=get_back_only_menu())
     await message.answer(
         "✍️ *Akademik Tahrirchi (Proofreading)*\n\n"
-        "O'zingiz yozgan xomaki matnni yuboring. Bot imloviy xatolarni tuzatadi va uni chiroyli ilmiy uslubga keltiradi:",
+        "O'zingiz yozgan matnni yuboring. Bot imlo xatolarini to'g'rilab, ilmiy va ravon holatga keltiradi.\n\n"
+        "💡 *Xohlagancha matnlaringizni ketma-ket tashlashingiz mumkin!*",
         parse_mode="Markdown"
     )
 
-@dp.message(BotStates.waiting_for_proofread_text, F.text)
-async def proofread_text_handler(message: types.Message, state: FSMContext) -> None:
+@dp.message(BotStates.in_proofread_mode, F.text)
+async def proofread_continuous_handler(message: types.Message, state: FSMContext) -> None:
+    if message.text == "⬅️ Orqaga":
+        await state.clear()
+        await message.answer("🏠 Asosiy menyudasiz.", reply_markup=get_main_reply_menu())
+        return
+
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
     wait_msg = await message.answer("⏳ Matn tahrir qilinmoqda...")
     edited = await proofread_text(message.text, lang=lang)
-    await state.clear()
     await wait_msg.delete()
-    await message.answer(edited, reply_markup=get_main_reply_menu())
+    await message.answer(edited, reply_markup=get_back_only_menu())
 
 # --- 🎧 8. TTS Audio Tinglash Callbacks ---
 @dp.callback_query(F.data.startswith("tts_play_"))
@@ -476,7 +512,7 @@ async def tts_callback_handler(callback: types.CallbackQuery):
     uid = int(callback.data.replace("tts_play_", ""))
     essay_text = last_generated_essays.get(uid)
     if not essay_text:
-        await callback.answer("⚠️ Audio tayyorlash uchun avval mustaqil ish generatsiya qiling.", show_alert=True)
+        await callback.answer("⚠️ Audio tayyorlash uchun avval mustaqil ish yozing.", show_alert=True)
         return
         
     await callback.answer("🎧 Audio tayyorlanmoqda (10 soniya)...")
@@ -490,7 +526,7 @@ async def tts_callback_handler(callback: types.CallbackQuery):
         audio_file = BufferedInputFile(audio_bytes, filename="mustaqil_ish_audio.mp3")
         await callback.message.answer_audio(
             audio=audio_file,
-            caption="🎧 *Mustaqil ishning audio versiyasi*\n\nYo'lda darsga ketayotganda eshitib tayyorlanish uchun juda qulay!",
+            caption="🎧 *Mustaqil ishning audio versiyasi*",
             parse_mode="Markdown"
         )
     else:
@@ -501,7 +537,7 @@ async def exam_sim_callback_handler(callback: types.CallbackQuery):
     uid = int(callback.data.replace("exam_sim_", ""))
     essay_text = last_generated_essays.get(uid, "Iqtisodiyot")
     await callback.answer("Savollar tayyorlanmoqda...")
-    wait_msg = await callback.message.answer("⏳ Ushbu mavzu bo'yicha imtihon savollari olinmoqda...")
+    wait_msg = await callback.message.answer("⏳ Mavzu bo'yicha imtihon savollari olinmoqda...")
     lang = await db.get_user_language(uid)
     questions = await generate_teacher_questions(essay_text[:200], lang=lang)
     await wait_msg.delete()
@@ -538,16 +574,16 @@ async def set_language_callback(callback: types.CallbackQuery):
     lang_code = callback.data.replace("setlang_", "")
     uid = callback.from_user.id
     await db.set_user_language(uid, lang_code)
-    await callback.answer("Til muvaffaqiyatli o'zgartirildi!")
-    await callback.message.edit_text("✅ Til sozlamalari yangilandi. Endi bot siz tanlagan tilda javob beradi.")
+    await callback.answer("Til o'zgartirildi!")
+    await callback.message.edit_text("✅ Til sozlamalari yangilandi.")
 
 # --- 📩 11. Feedback (Fikr-mulohaza) ---
 @dp.message(Command("feedback"))
 async def feedback_command_handler(message: types.Message, state: FSMContext) -> None:
-    await state.set_state(BotStates.waiting_for_feedback)
+    await state.set_state(BotStates.in_feedback_mode)
     await message.answer("✍️ Iltimos, o'z fikr-mulohazangiz yoki taklifingizni bitta xabar qilib yozib yuboring:")
 
-@dp.message(BotStates.waiting_for_feedback)
+@dp.message(BotStates.in_feedback_mode)
 async def feedback_process_handler(message: types.Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
     uid = message.from_user.id
@@ -681,7 +717,7 @@ async def custom_topic_handler(callback: types.CallbackQuery, state: FSMContext)
     subj_title = knowledge_base[subj_id]["title"]
     
     await state.update_data(subject_title=subj_title)
-    await state.set_state(BotStates.waiting_for_custom_topic)
+    await state.set_state(BotStates.in_custom_essay_mode)
     
     try:
         await callback.message.edit_text(f"Yaxshi! *{subj_title}* fani bo'yicha o'z mavzusingizni matn qilib yozib yuboring:", parse_mode="Markdown")
@@ -689,16 +725,20 @@ async def custom_topic_handler(callback: types.CallbackQuery, state: FSMContext)
     except TelegramAPIError:
         pass
 
-@dp.message(BotStates.waiting_for_custom_topic)
+@dp.message(BotStates.in_custom_essay_mode, F.text)
 async def custom_topic_message_handler(message: types.Message, state: FSMContext) -> None:
+    if message.text == "⬅️ Orqaga":
+        await state.clear()
+        await message.answer("🏠 Asosiy menyudasiz.", reply_markup=get_main_reply_menu())
+        return
+
     data = await state.get_data()
-    subj_title = data.get("subject_title", "Tanlanmagan fan")
+    subj_title = data.get("subject_title", "Iqtisodiyot")
     topic = message.text
     if not topic:
         await message.answer("Iltimos, mavzuni matn ko'rinishida kiriting.")
         return
         
-    await state.clear()
     await generate_essay(message, subj_title, topic)
 
 @dp.callback_query(F.data.startswith("topic_"))
@@ -790,6 +830,22 @@ async def forwarded_channel_message_handler(message: types.Message, bot: Bot):
             await wait_msg.edit_text(f"✅ *{title}* kanaliga muvaffaqiyatli ulandi va birinchi GitHub zaxira nusxasi yuborildi!", parse_mode="Markdown")
         else:
             await wait_msg.edit_text(f"⚠️ Kanal ID si `{ch_id}` saqlandi, ammo bot xabar yubora olmadi.", parse_mode="Markdown")
+
+# --- 💬 14. Umumiy Matn Qabul Qiluvchi (Hech Qachon Jim Qolmaslik Uchun) ---
+@dp.message(F.text)
+async def fallback_text_handler(message: types.Message) -> None:
+    if message.text == "⬅️ Orqaga":
+        await message.answer("🏠 Asosiy menyudasiz. Quyidagi bo'limlardan birini tanlang:", reply_markup=get_main_reply_menu())
+        return
+
+    uid = message.from_user.id if message.from_user else 0
+    lang = await db.get_user_language(uid) if uid else "uz"
+    
+    # Quick short answer to any general economics question
+    wait_msg = await message.answer("⏳ Javob tayyorlanmoqda...")
+    ans = await solve_economic_problem(message.text, lang=lang)
+    await wait_msg.delete()
+    await message.answer(ans, reply_markup=get_main_reply_menu())
 
 # ==============================================================================
 # 🚀 SYSTEM ENTRY (POLLING + WEB SERVER + BACKUP SCHEDULER)
