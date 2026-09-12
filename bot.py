@@ -637,7 +637,7 @@ async def inline_search_handler(inline_query: types.InlineQuery):
     results = []
     
     bot_info = await inline_query.bot.get_me()
-    bot_username = bot_info.username or "mustaqil_ishh_bot"
+    bot_username = bot_info.username or "Soulbekbot"
     
     count = 0
     for subj_id, data in knowledge_base.items():
