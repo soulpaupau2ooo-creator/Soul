@@ -56,7 +56,7 @@ def fetch_latest_commit() -> Tuple[str, str]:
 async def perform_backup(bot: Bot, target_channel: Optional[str] = None) -> bool:
     """Perform a backup: delete previous message and send latest zipball."""
     state = await db.get_backup_state()
-    channel = target_channel or state.get("channel") or os.getenv("BACKUP_CHANNEL")
+    channel = target_channel or state.get("channel") or os.getenv("BACKUP_CHANNEL", "@soul_backups")
     
     if not channel:
         logger.info("ℹ️ Backup kanali hali belgilanmagan (/set_backup @kanal buyrug'ini yuboring).")
