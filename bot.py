@@ -105,6 +105,13 @@ def get_back_only_menu() -> ReplyKeyboardMarkup:
     kb = [[KeyboardButton(text="⬅️ Orqaga")]]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Chiqish uchun 'Orqaga' bosing...")
 
+def get_language_reply_menu() -> ReplyKeyboardMarkup:
+    kb = [
+        [KeyboardButton(text="🇺🇿 O'zbekcha"), KeyboardButton(text="🇷🇺 Русский")],
+        [KeyboardButton(text="🇬🇧 English"), KeyboardButton(text="🇺🇿 Ўзбекча")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Tilni tanlang / Выберите язык...")
+
 def get_start_language_inline() -> InlineKeyboardMarkup:
     kb = [
         [InlineKeyboardButton(text="🇺🇿 O'zbekcha (Lotin)", callback_data="firstlang_uz")],
@@ -324,14 +331,37 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
             username=message.from_user.username
         )
         
-    # First step: Clean Language Selection
+    # Start bosganda faqatgina til tanlash chiqadi, boshqa hech qanday menyu chiqmaydi!
     welcome_text = (
-        f"Assalomu alaykum, {message.from_user.full_name}!\n\n"
         "Iltimos, o'zingizga qulay tilni tanlang:\n"
         "Пожалуйста, выберите язык:\n"
         "Please choose your language:"
     )
-    await message.answer(welcome_text, reply_markup=get_start_language_inline())
+    await message.answer(welcome_text, reply_markup=get_language_reply_menu())
+
+@dp.message(F.text.in_(["🇺🇿 O'zbekcha", "🇷🇺 Русский", "🇬🇧 English", "🇺🇿 Ўзбекча"]))
+async def language_selection_handler(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
+    uid = message.from_user.id if message.from_user else 0
+    choice = message.text
+    
+    if choice == "🇺🇿 O'zbekcha":
+        lang = "uz"
+        reply_text = "Assalomu alaykum! Sizga qanday yordam kerak?\n\nQuyidagi bo'limlardan birini tanlang:"
+    elif choice == "🇷🇺 Русский":
+        lang = "ru"
+        reply_text = "Здравствуйте! Чем я могу вам помочь?\n\nВыберите нужный раздел:"
+    elif choice == "🇬🇧 English":
+        lang = "en"
+        reply_text = "Hello! How can I help you today?\n\nPlease select an option:"
+    else:
+        lang = "uz_cyr"
+        reply_text = "Ассалому алайкум! Сизга қандай ёрдам керак?\n\nКеракли бўлимни танланг:"
+        
+    if uid:
+        await db.set_user_language(uid, lang)
+        
+    await message.answer(reply_text, reply_markup=get_main_reply_menu())
 
 @dp.callback_query(F.data.startswith("firstlang_"))
 async def first_language_callback(callback: types.CallbackQuery):
@@ -340,24 +370,20 @@ async def first_language_callback(callback: types.CallbackQuery):
     await db.set_user_language(uid, lang_code)
     await callback.answer("Til tanlandi!")
     
-    lang_names = {
-        "uz": "O'zbekcha (Lotin)",
-        "uz_cyr": "Ўзбекча (Кирилл)",
-        "ru": "Русский язык",
-        "en": "English"
-    }
-    chosen = lang_names.get(lang_code, "O'zbekcha")
-    
-    text = (
-        f"✅ Til: *{chosen}*\n\n"
-        "O'zbekistondagi nufuzli OTMlar o'quv dasturi asosidagi **Akademik AI Assistent**ga xush kelibsiz!\n\n"
-        "Quyidagi bo'limlardan birini tanlang:"
-    )
+    if lang_code == "uz":
+        text = "Assalomu alaykum! Sizga qanday yordam kerak?\n\nQuyidagi bo'limlardan birini tanlang:"
+    elif lang_code == "ru":
+        text = "Здравствуйте! Чем я могу вам помочь?\n\nВыберите нужный раздел:"
+    elif lang_code == "en":
+        text = "Hello! How can I help you today?\n\nPlease select an option:"
+    else:
+        text = "Ассалому алайкум! Сизга қандай ёрдам керак?\n\nКеракли бўлимни танланг:"
+        
     try:
         await callback.message.delete()
     except Exception:
         pass
-    await callback.message.answer(text, reply_markup=get_main_reply_menu(), parse_mode="Markdown")
+    await callback.message.answer(text, reply_markup=get_main_reply_menu())
 
 @dp.message(F.text == "⬅️ Orqaga")
 async def back_to_main_reply(message: types.Message, state: FSMContext) -> None:
@@ -567,7 +593,7 @@ async def btn_referral_handler(message: types.Message) -> None:
 # --- 🌐 10. Tilni Tanlash ---
 @dp.message(F.text == "🌐 Tilni tanlash")
 async def btn_language_handler(message: types.Message) -> None:
-    await message.answer("Iltimos, o'zingizga qulay tilni tanlang:", reply_markup=get_languages_menu())
+    await message.answer("Iltimos, o'zingizga qulay tilni tanlang:", reply_markup=get_language_reply_menu())
 
 @dp.callback_query(F.data.startswith("setlang_"))
 async def set_language_callback(callback: types.CallbackQuery):
