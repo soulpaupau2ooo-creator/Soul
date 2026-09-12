@@ -167,4 +167,93 @@ class DatabaseManager:
         data["backup_state"] = current
         self._save_local(data)
 
+    async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user details."""
+        if self.is_connected and self.users_col is not None:
+            try:
+                return await self.users_col.find_one({"user_id": user_id})
+            except Exception as e:
+                logger.error(f"Error fetching user {user_id}: {e}")
+        data = self._load_local()
+        return data.get("users", {}).get(str(user_id))
+
+    async def set_user_language(self, user_id: int, lang: str):
+        """Update user interface language."""
+        if self.is_connected and self.users_col is not None:
+            try:
+                await self.users_col.update_one({"user_id": user_id}, {"$set": {"lang": lang}}, upsert=True)
+                return
+            except Exception as e:
+                logger.error(f"Error setting lang: {e}")
+        data = self._load_local()
+        uid = str(user_id)
+        if uid in data.get("users", {}):
+            data["users"][uid]["lang"] = lang
+            self._save_local(data)
+
+    async def get_user_language(self, user_id: int) -> str:
+        """Get user interface language."""
+        user = await self.get_user(user_id)
+        if user and "lang" in user:
+            return user["lang"]
+        return "uz"
+
+    async def add_referral(self, inviter_id: int, new_user_id: int) -> bool:
+        """Add referral point if user is newly invited."""
+        if inviter_id == new_user_id:
+            return False
+            
+        inviter = await self.get_user(inviter_id)
+        if not inviter:
+            return False
+
+        if self.is_connected and self.users_col is not None:
+            try:
+                # Check if already referred
+                new_user = await self.users_col.find_one({"user_id": new_user_id})
+                if new_user and new_user.get("referred_by"):
+                    return False
+                await self.users_col.update_one({"user_id": new_user_id}, {"$set": {"referred_by": inviter_id}}, upsert=True)
+                await self.users_col.update_one({"user_id": inviter_id}, {"$inc": {"referral_count": 1, "points": 10}}, upsert=True)
+                return True
+            except Exception as e:
+                logger.error(f"Error adding referral: {e}")
+                return False
+                
+        data = self._load_local()
+        n_uid = str(new_user_id)
+        i_uid = str(inviter_id)
+        if n_uid in data.get("users", {}) and data["users"][n_uid].get("referred_by"):
+            return False
+        if i_uid in data.get("users", {}):
+            if "referral_count" not in data["users"][i_uid]:
+                data["users"][i_uid]["referral_count"] = 0
+                data["users"][i_uid]["points"] = 0
+            data["users"][i_uid]["referral_count"] += 1
+            data["users"][i_uid]["points"] += 10
+            if n_uid in data.get("users", {}):
+                data["users"][n_uid]["referred_by"] = inviter_id
+            self._save_local(data)
+            return True
+        return False
+
+    async def is_banned(self, user_id: int) -> bool:
+        """Check if user is in blacklist."""
+        user = await self.get_user(user_id)
+        return bool(user and user.get("is_banned"))
+
+    async def set_ban_status(self, user_id: int, is_banned: bool):
+        """Ban or unban user."""
+        if self.is_connected and self.users_col is not None:
+            try:
+                await self.users_col.update_one({"user_id": user_id}, {"$set": {"is_banned": is_banned}}, upsert=True)
+                return
+            except Exception as e:
+                logger.error(f"Error setting ban status: {e}")
+        data = self._load_local()
+        uid = str(user_id)
+        if uid in data.get("users", {}):
+            data["users"][uid]["is_banned"] = is_banned
+            self._save_local(data)
+
 db = DatabaseManager()
