@@ -276,6 +276,16 @@ async def set_backup_handler(message: types.Message, bot: Bot) -> None:
         return
         
     new_channel = args[1].strip()
+    if new_channel.startswith("http://") or new_channel.startswith("https://"):
+        await message.answer(
+            "⚠️ *Eslatma:* Telegram Bot API taklif havolalari (`https://t.me/+...`) orqali kanalni to'g'ridan-to'g'ri taniy olmaydi.\n\n"
+            "💡 *Eng oson yo'li:*\n"
+            "O'sha **Backups** kanalingizdagi istalgan 1 ta xabarni (masalan, 'Channel created' yoki oddiy so'zni) **botga FORWARD (Uzatish / Переслать)** qiling!\n\n"
+            "Bot kanal ID sini o'zi bir zumda aniqlab, darhol ulanadi!",
+            parse_mode="Markdown"
+        )
+        return
+
     await db.update_backup_state(channel=new_channel)
     wait_msg = await message.answer(f"⏳ Backup kanali `{new_channel}` ga o'rnatildi. Birinchi zaxira nusxasi yuborilmoqda...", parse_mode="Markdown")
     success = await perform_backup(bot, target_channel=new_channel)
@@ -311,6 +321,29 @@ async def bot_added_to_channel_handler(event: ChatMemberUpdated, bot: Bot):
         logger.info(f"📢 Bot {chat.title} ({channel_identifier}) kanaliga admin qilindi!")
         await db.update_backup_state(channel=channel_identifier)
         await perform_backup(bot, target_channel=channel_identifier)
+
+@dp.message(F.forward_from_chat)
+async def forwarded_channel_message_handler(message: types.Message, bot: Bot):
+    chat = message.forward_from_chat
+    if chat and chat.type in ("channel", "supergroup"):
+        ch_id = str(chat.id)
+        title = chat.title or "Kanal"
+        await db.update_backup_state(channel=ch_id)
+        wait_msg = await message.answer(f"✅ Maxfiy kanal aniqlandi: *{title}* (ID: `{ch_id}`)\n\nBirinchi GitHub zaxira nusxasi yuborilmoqda...", parse_mode="Markdown")
+        success = await perform_backup(bot, target_channel=ch_id)
+        if success:
+            await wait_msg.edit_text(f"✅ *{title}* kanaliga muvaffaqiyatli ulandi va birinchi GitHub zaxira nusxasi yuborildi!\n\nEndi har 30 daqiqada yangilanib, eskilari o'chirib boriladi.", parse_mode="Markdown")
+        else:
+            await wait_msg.edit_text(f"⚠️ Kanal ID si `{ch_id}` saqlandi, ammo bot xabar yubora olmadi. Bot o'sha kanalda ADMIN ekanligini va xabar yozish ruxsatini tekshiring.", parse_mode="Markdown")
+
+@dp.channel_post()
+async def channel_post_listener(message: types.Message, bot: Bot):
+    chat = message.chat
+    logger.info(f"📢 Kanalda post aniqlandi: {chat.title} (ID: {chat.id})")
+    state = await db.get_backup_state()
+    if not state.get("channel") or "/set_backup" in (message.text or ""):
+        await db.update_backup_state(channel=str(chat.id))
+        await perform_backup(bot, target_channel=str(chat.id))
 
 @dp.message(F.text == "⬅️ Orqaga")
 async def main_menu_handler(message: types.Message, state: FSMContext) -> None:
