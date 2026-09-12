@@ -11,7 +11,8 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, ADMINISTRATOR
 from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, 
-    ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
+    ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated,
+    BufferedInputFile, InlineQueryResultArticle, InputTextMessageContent
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -21,6 +22,15 @@ from dotenv import load_dotenv
 
 from database import db
 from backup_manager import backup_scheduler_loop, perform_backup
+from academic_tools import (
+    solve_economic_problem, generate_teacher_questions,
+    summarize_article, proofread_text, generate_economic_chart
+)
+from multimodal_handler import process_photo_problem, process_voice_topic, generate_tts_audio
+from admin_suite import (
+    web_admin_dashboard_handler, broadcast_message, send_daily_report,
+    daily_report_scheduler, is_rate_limited, essay_cache, ADMIN_IDS
+)
 
 # ==============================================================================
 # 🛠️ KONFIGURATSIYA VA YADRO (FATHER MODE v6.0)
@@ -35,11 +45,18 @@ if not BOT_TOKEN:
 
 dp = Dispatcher()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("Soulbekbot")
 
-class GenerateState(StatesGroup):
+class BotStates(StatesGroup):
     waiting_for_custom_topic = State()
-    waiting_for_subject = State()
+    waiting_for_problem_solve = State()
+    waiting_for_teacher_topic = State()
+    waiting_for_proofread_text = State()
+    waiting_for_summary_text = State()
+    waiting_for_feedback = State()
+
+# In-memory storage for TTS audio generation of essays
+last_generated_essays: Dict[int, str] = {}
 
 # ==============================================================================
 # 📚 MA'LUMOTLAR BAZASI (KNOWLEDGE BASE)
@@ -74,14 +91,19 @@ categories: Dict[str, Dict[str, Any]] = {
 }
 
 # ==============================================================================
-# 🖥️ FOYDALANUVCHI INTERFEYSI (UI)
+# 🖥️ FOYDALANUVCHI INTERFEYSI (UI MENYULAR)
 # ==============================================================================
 def get_main_reply_menu() -> ReplyKeyboardMarkup:
-    kb = [[KeyboardButton(text="📚 Mustaqil ish yozish")]]
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Quyidagi tugmani bosing...")
+    kb = [
+        [KeyboardButton(text="📚 Mustaqil ish yozish")],
+        [KeyboardButton(text="🧮 Masala yechish"), KeyboardButton(text="📊 Iqtisodiy grafiklar")],
+        [KeyboardButton(text="🎓 O'qituvchi savollari"), KeyboardButton(text="✍️ Matn tahrirlash")],
+        [KeyboardButton(text="👥 Referal (Do'stlar)"), KeyboardButton(text="🌐 Tilni tanlash")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Kerakli bo'limni tanlang...")
 
 def get_back_reply_menu() -> ReplyKeyboardMarkup:
-    kb = [[KeyboardButton(text="⬅️ Orqaga")]]
+    kb = [[KeyboardButton(text="⬅️ Asosiy menyu")]]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Asosiy menyuga qaytish...")
 
 def get_main_menu() -> InlineKeyboardMarkup:
@@ -99,8 +121,33 @@ def get_topics_menu(subj_id: str) -> InlineKeyboardMarkup:
     kb.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
+def get_chart_selection_menu() -> InlineKeyboardMarkup:
+    kb = [
+        [InlineKeyboardButton(text="📈 Talab va Taklif muvozanati", callback_data="chart_supply_demand")],
+        [InlineKeyboardButton(text="📊 O'zbekiston YaIM o'sishi", callback_data="chart_gdp_growth")],
+        [InlineKeyboardButton(text="📉 Fillips egri chizig'i (Inflyatsiya/Ishsizlik)", callback_data="chart_phillips")],
+        [InlineKeyboardButton(text="🥧 Iqtisodiyot tarmoqlari ulushi", callback_data="chart_sectors")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_languages_menu() -> InlineKeyboardMarkup:
+    kb = [
+        [InlineKeyboardButton(text="🇺🇿 O'zbekcha (Lotin)", callback_data="setlang_uz")],
+        [InlineKeyboardButton(text="🇺🇿 Ўзбекча (Кирилл)", callback_data="setlang_uz_cyr")],
+        [InlineKeyboardButton(text="🇷🇺 Русский язык", callback_data="setlang_ru")],
+        [InlineKeyboardButton(text="🇬🇧 English", callback_data="setlang_en")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_essay_action_menu(user_id: int) -> InlineKeyboardMarkup:
+    kb = [
+        [InlineKeyboardButton(text="🎧 Ovozli tinglash (Audio)", callback_data=f"tts_play_{user_id}")],
+        [InlineKeyboardButton(text="🎓 O'qituvchi savollari (Imtihon)", callback_data=f"exam_sim_{user_id}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
 # ==============================================================================
-# 🌐 RENDER.COM VA CRON-JOB.ORG KEEP-ALIVE WEB SERVER (/health)
+# 🌐 KEEP-ALIVE & WEB ADMIN SERVER (/health va /admin)
 # ==============================================================================
 async def health_check_handler(request: web.Request) -> web.Response:
     stats = await db.get_stats()
@@ -115,7 +162,7 @@ async def health_check_handler(request: web.Request) -> web.Response:
 
 async def root_handler(request: web.Request) -> web.Response:
     return web.Response(
-        text="🤖 Soulbekbot 24/7 Cloud Hosting da faol ishlamoqda!\nKeep-alive health endpoint: /health",
+        text="🤖 Soulbekbot 24/7 Cloud Hosting da faol ishlamoqda!\nKeep-alive health endpoint: /health\nWeb Admin Dashboard: /admin",
         content_type="text/plain; charset=utf-8"
     )
 
@@ -123,20 +170,27 @@ async def start_web_server():
     app = web.Application()
     app.router.add_get("/", root_handler)
     app.router.add_get("/health", health_check_handler)
+    app.router.add_get("/admin", web_admin_dashboard_handler)
     
     port = int(os.getenv("PORT", 10000))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info(f"🌐 Keep-Alive Web Server 0.0.0.0:{port} portida ishga tushdi (/health tayyor)")
+    logger.info(f"🌐 Keep-Alive Web Server 0.0.0.0:{port} portida ishga tushdi (/health va /admin tayyor)")
     return runner
 
 # ==============================================================================
-# 🤖 YUKORI DARAJADAGI AI VA QAYTA URINISH MANTIG'I (RESILIENCE)
+# 🤖 YUKORI DARAJADAGI AI VA KESH (RESILIENCE + LRU CACHE)
 # ==============================================================================
 async def request_ai_content(prompt: str) -> str:
-    """Asynchronous AI request with robust round-robin API Key rotation and exponential backoff."""
+    """Asynchronous AI request with robust round-robin API Key rotation and LRU caching."""
+    # Check In-Memory Cache first to save Gemini API requests
+    cache_key = prompt.strip()
+    if cache_key in essay_cache:
+        logger.info("⚡ Javob keshdan olindi (Cache Hit)!")
+        return essay_cache[cache_key]
+
     if not API_KEYS:
         raise ValueError("AI API KEYS REQUIRED")
         
@@ -154,7 +208,10 @@ async def request_ai_content(prompt: str) -> str:
             if not response or not response.text:
                 raise ValueError("Bosh javob olindi.")
                 
-            return response.text
+            result_text = response.text
+            # Store in cache
+            essay_cache[cache_key] = result_text
+            return result_text
             
         except Exception as e:
             last_exception = e
@@ -171,17 +228,19 @@ async def request_ai_content(prompt: str) -> str:
     return "Xatolik."
 
 async def generate_essay(message: types.Message, subject: str, topic: str) -> None:
+    user_id = message.from_user.id if message.from_user else 0
     if not API_KEYS:
         await message.answer("⚠️ Kechirasiz, botning Sun'iy Intelekt qismi (Brain) ulanmagan. Iltimos, ma'muriyatga xabar bering.")
         return
         
     wait_msg = await message.answer(f"⏳ *{subject}* fani bo'yicha *\"{topic}\"* mavzusida mukammal va qisqa mustaqil ish tayyorlanmoqda...\n\n_Iltimos, ozroq kuting..._", parse_mode="Markdown")
     
+    lang = await db.get_user_language(user_id) if user_id else "uz"
     prompt = (
         f"Sen iqtisodiyot professori rolidasan. "
         f"Menga {subject} fani bo'yicha '{topic}' mavzusida qisqa, lo'nda va juda ma'noli mustaqil ish yozib ber. "
         f"Qoidalar:\n"
-        f"1. Til: O'zbek tili (lotin yozuvida).\n"
+        f"1. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Ўзбекча (Кирилл)' if lang == 'uz_cyr' else 'Русский язык' if lang == 'ru' else 'English'}.\n"
         f"2. Matn hajmi qisqa bo'lsin (taxminan 1000-1500 belgi), ortiqcha suv gaplarsiz, faqat eng muhim faktlar va mohiyat ochib berilsin.\n"
         f"3. Tuzilishi: Qisqacha kirish, 1-2 ta eng asosiy fikr/tahlil va aniq xulosa.\n"
         f"4. MUHIM: Hech qanday maxsus belgilarsiz (yulduzcha *, tagchiziq _ va qalin harflar) mutlaqo oddiy matn ko'rinishida yozing, chunki Telegram qabul qilolmaydi."
@@ -189,6 +248,10 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
     
     try:
         text = await request_ai_content(prompt)
+        
+        # Save in memory for TTS audio
+        if user_id:
+            last_generated_essays[user_id] = text
         
         # Log to Database
         if message.from_user:
@@ -204,7 +267,7 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
             for part in parts:
                 await message.answer(part)
         else:
-            await message.answer(text)
+            await message.answer(text, reply_markup=get_essay_action_menu(user_id))
             
         await wait_msg.delete()
         
@@ -225,8 +288,35 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
 @dp.message(CommandStart())
 async def command_start_handler(message: types.Message, state: FSMContext) -> None:
     await state.clear()
+    uid = message.from_user.id if message.from_user else 0
     
-    # Save user to DB (MongoDB Atlas or JSON)
+    # Check Anti-Spam
+    if is_rate_limited(uid):
+        return
+        
+    # Check Blacklist
+    if await db.is_banned(uid):
+        await message.answer("🚫 Siz botdan foydalanishdan chetlashtirilgansiz.")
+        return
+
+    # Check referral start: /start ref_123456
+    text_parts = (message.text or "").split()
+    if len(text_parts) > 1 and text_parts[1].startswith("ref_"):
+        try:
+            inviter_id = int(text_parts[1].replace("ref_", ""))
+            referred = await db.add_referral(inviter_id=inviter_id, new_user_id=uid)
+            if referred:
+                try:
+                    await message.bot.send_message(
+                        chat_id=inviter_id,
+                        text=f"🎉 Sizning havolangiz orqali yangi do'stingiz ({message.from_user.full_name}) botga qo'shildi! Sizga +10 ball berildi."
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Referral parsing error: {e}")
+
+    # Save user to DB
     if message.from_user:
         await db.add_or_update_user(
             user_id=message.from_user.id,
@@ -234,131 +324,325 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
             username=message.from_user.username
         )
         
-    text = (
+    welcome_text = (
         f"Assalomu alaykum, {message.from_user.full_name}!\n\n"
-        "O'zbekistondagi nufuzli OTMlar o'quv dasturi asosidagi **Mustaqil ish yaratuvchi bot**ga xush kelibsiz!\n\n"
-        "Boshlash uchun pastdagi **\"📚 Mustaqil ish yozish\"** tugmasini bosing:"
+        "O'zbekistondagi barcha nufuzli OTMlar o'quv dasturi asosidagi **Akademik AI Assistent**ga xush kelibsiz!\n\n"
+        "✨ *Imkoniyatlarimiz:*\n"
+        "• 📚 Mustaqil ishlar generatsiyasi (Lotin/Kirill/Rus/Ingliz)\n"
+        "• 🧮 Iqtisodiy masalalarni yechish (Matn va Rasm orqali)\n"
+        "• 📊 Talab-Taklif, YaIM va Fillips grafiklarini chizish\n"
+        "• 🎧 Mustaqil ishni audio qilib eshitish (Audiobook)\n"
+        "• 🎓 O'qituvchi savollariga tayyorlovchi simulyator\n"
+        "• 🎤 Ovozli xabar orqali mavzu aytish\n\n"
+        "Kerakli bo'limni tanlang:"
     )
-    try:
-        await message.answer(text, reply_markup=get_main_reply_menu(), parse_mode="Markdown")
-    except TelegramAPIError as e:
-        logger.error(f"Failed to send start message: {e}")
+    await message.answer(welcome_text, reply_markup=get_main_reply_menu(), parse_mode="Markdown")
 
-@dp.message(Command("stats"))
-async def stats_command_handler(message: types.Message) -> None:
-    stats = await db.get_stats()
-    b_state = await db.get_backup_state()
-    ch_info = b_state.get("channel", "Belgilanmagan")
-    db_type = "MongoDB Atlas (Bulut)" if db.is_connected else "Mahalliy Zaxira (JSON)"
-    text = (
-        f"📊 *Bot statistikasi:*\n\n"
-        f"👥 Foydalanuvchilar: *{stats.get('users', 0)}* ta\n"
-        f"📝 Tayyorlangan mustaqil ishlar: *{stats.get('requests', 0)}* ta\n"
-        f"🗄 Ma'lumotlar bazasi: *{db_type}*\n"
-        f"📦 Backup kanali: `{ch_info}`\n"
-        f"🌐 Keep-Alive Server: *Faol (/health)*"
-    )
-    await message.answer(text, parse_mode="Markdown")
-
-@dp.message(Command("set_backup"))
-async def set_backup_handler(message: types.Message, bot: Bot) -> None:
-    args = message.text.split()
-    if len(args) < 2:
-        state = await db.get_backup_state()
-        current = state.get("channel", "Belgilanmagan")
-        await message.answer(
-            f"ℹ️ *Joriy backup kanali:* `{current}`\n\n"
-            "Yangi kanalni ulash uchun kanal username yoki ID sini yuboring:\n"
-            "Masalan: `/set_backup @kanal_nomi` yoki `/set_backup -1001234567890`\n\n"
-            "⚠️ Bot ushbu kanalda ADMIN bo'lishi va xabar yozish ruxsati berilgan bo'lishi shart!",
-            parse_mode="Markdown"
-        )
-        return
-        
-    new_channel = args[1].strip()
-    if new_channel.startswith("http://") or new_channel.startswith("https://"):
-        await message.answer(
-            "⚠️ *Eslatma:* Telegram Bot API taklif havolalari (`https://t.me/+...`) orqali kanalni to'g'ridan-to'g'ri taniy olmaydi.\n\n"
-            "💡 *Eng oson yo'li:*\n"
-            "O'sha **Backups** kanalingizdagi istalgan 1 ta xabarni (masalan, 'Channel created' yoki oddiy so'zni) **botga FORWARD (Uzatish / Переслать)** qiling!\n\n"
-            "Bot kanal ID sini o'zi bir zumda aniqlab, darhol ulanadi!",
-            parse_mode="Markdown"
-        )
-        return
-
-    await db.update_backup_state(channel=new_channel)
-    wait_msg = await message.answer(f"⏳ Backup kanali `{new_channel}` ga o'rnatildi. Birinchi zaxira nusxasi yuborilmoqda...", parse_mode="Markdown")
-    success = await perform_backup(bot, target_channel=new_channel)
-    if success:
-        await wait_msg.edit_text(
-            f"✅ Kanal `{new_channel}` ga muvaffaqiyatli ulandi va birinchi GitHub zaxira nusxasi yuborildi!\n\n"
-            "⏱ Endi bot har 30 daqiqada yangi backup yuborib, kanal toza turishi uchun avvalgisini avtomatik o'chirib boradi.",
-            parse_mode="Markdown"
-        )
-    else:
-        await wait_msg.edit_text(
-            f"⚠️ Kanal `{new_channel}` ga saqlandi, lekin zaxirani yuborishda xatolik bo'ldi.\n\n"
-            "Iltimos, bot o'sha kanalda ADMIN ekanligini va unga *Post Messages* (xabar yozish) huquqi berilganligini tekshiring.",
-            parse_mode="Markdown"
-        )
-
-@dp.message(Command("backup"))
-async def trigger_backup_handler(message: types.Message, bot: Bot) -> None:
-    wait_msg = await message.answer("⏳ Yangi GitHub backup tayyorlanmoqda va kanalga yuborilmoqda...")
-    success = await perform_backup(bot)
-    if success:
-        state = await db.get_backup_state()
-        ch = state.get("channel", "kanal")
-        await wait_msg.edit_text(f"✅ Yangi GitHub backup `{ch}` kanaliga yuborildi! (Eski backup o'chirildi).")
-    else:
-        await wait_msg.edit_text("❌ Backup yuborilmadi. Avval `/set_backup @kanal_nomi` buyrug'i bilan kanalni sozlang.")
-
-@dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=ADMINISTRATOR))
-async def bot_added_to_channel_handler(event: ChatMemberUpdated, bot: Bot):
-    chat = event.chat
-    if chat.type in ("channel", "supergroup"):
-        channel_identifier = f"@{chat.username}" if chat.username else str(chat.id)
-        logger.info(f"📢 Bot {chat.title} ({channel_identifier}) kanaliga admin qilindi!")
-        await db.update_backup_state(channel=channel_identifier)
-        await perform_backup(bot, target_channel=channel_identifier)
-
-@dp.message(F.forward_from_chat)
-async def forwarded_channel_message_handler(message: types.Message, bot: Bot):
-    chat = message.forward_from_chat
-    if chat and chat.type in ("channel", "supergroup"):
-        ch_id = str(chat.id)
-        title = chat.title or "Kanal"
-        await db.update_backup_state(channel=ch_id)
-        wait_msg = await message.answer(f"✅ Maxfiy kanal aniqlandi: *{title}* (ID: `{ch_id}`)\n\nBirinchi GitHub zaxira nusxasi yuborilmoqda...", parse_mode="Markdown")
-        success = await perform_backup(bot, target_channel=ch_id)
-        if success:
-            await wait_msg.edit_text(f"✅ *{title}* kanaliga muvaffaqiyatli ulandi va birinchi GitHub zaxira nusxasi yuborildi!\n\nEndi har 30 daqiqada yangilanib, eskilari o'chirib boriladi.", parse_mode="Markdown")
-        else:
-            await wait_msg.edit_text(f"⚠️ Kanal ID si `{ch_id}` saqlandi, ammo bot xabar yubora olmadi. Bot o'sha kanalda ADMIN ekanligini va xabar yozish ruxsatini tekshiring.", parse_mode="Markdown")
-
-@dp.channel_post()
-async def channel_post_listener(message: types.Message, bot: Bot):
-    chat = message.chat
-    logger.info(f"📢 Kanalda post aniqlandi: {chat.title} (ID: {chat.id})")
-    state = await db.get_backup_state()
-    if not state.get("channel") or "/set_backup" in (message.text or ""):
-        await db.update_backup_state(channel=str(chat.id))
-        await perform_backup(bot, target_channel=str(chat.id))
-
-@dp.message(F.text == "⬅️ Orqaga")
-async def main_menu_handler(message: types.Message, state: FSMContext) -> None:
+@dp.message(F.text == "⬅️ Asosiy menyu")
+async def back_to_main_reply(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("🏠 Asosiy menyudasiz. Boshlash uchun quyidagi tugmani bosing:", reply_markup=get_main_reply_menu())
+    await message.answer("🏠 Asosiy menyudasiz. Quyidagilardan birini tanlang:", reply_markup=get_main_reply_menu())
 
+# --- 📚 1. Mustaqil Ish Bo'limi ---
 @dp.message(F.text == "📚 Mustaqil ish yozish")
 async def btn_mustaqil_ish_handler(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    # Change bottom menu to 'Back'
     await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
-    # Display Inline menu
     text = "Ajoyib! Endi o'zingizga kerakli Iqtisodiyot yo'nalishini tanlang:"
     await message.answer(text, reply_markup=get_main_menu())
 
+# --- 🧮 2. Masala Yechish Bo'limi ---
+@dp.message(F.text == "🧮 Masala yechish")
+async def btn_problem_solve_handler(message: types.Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.waiting_for_problem_solve)
+    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
+    await message.answer(
+        "🧮 *Iqtisodiy Masalalar Kalkulyatori*\n\n"
+        "Iqtisodiyotga oid istalgan masalangizni matn ko'rinishida yozib yuboring yoki **daftardagi/kitobdagi rasmini tashlang**!\n\n"
+        "_Masalan: \"Bozorda talab funksiyasi Qd = 100 - 2P, taklif Qs = 10 + 4P bo'lsa, muvozanat narxi va hajmini toping.\"_",
+        parse_mode="Markdown"
+    )
+
+@dp.message(BotStates.waiting_for_problem_solve, F.text)
+async def problem_text_handler(message: types.Message, state: FSMContext) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    lang = await db.get_user_language(uid) if uid else "uz"
+    wait_msg = await message.answer("⏳ Masala tahlil qilinmoqda va yechilmoqda...")
+    solution = await solve_economic_problem(message.text, lang=lang)
+    await state.clear()
+    await wait_msg.delete()
+    await message.answer(solution, reply_markup=get_main_reply_menu())
+
+# --- 📸 3. Rasm orqali masala yechish (Gemini Vision OCR) ---
+@dp.message(F.photo)
+async def photo_message_handler(message: types.Message, bot: Bot, state: FSMContext) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    lang = await db.get_user_language(uid) if uid else "uz"
+    photo = message.photo[-1]  # Get highest resolution
+    wait_msg = await message.answer("📸 Rasm qabul qilindi! Sun'iy Intellekt masalani o'qib, yechishni boshladi...")
+    solution = await process_photo_problem(bot, photo, lang=lang)
+    await state.clear()
+    await wait_msg.delete()
+    await message.answer(solution, reply_markup=get_main_reply_menu())
+
+# --- 🎤 4. Ovozli xabar orqali mavzu qabul qilish ---
+@dp.message(F.voice)
+async def voice_message_handler(message: types.Message, bot: Bot) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    lang = await db.get_user_language(uid) if uid else "uz"
+    wait_msg = await message.answer("🎙 Ovozli xabaringiz eshitilmoqda va matnga aylantirilmoqda...")
+    result = await process_voice_topic(bot, message.voice, lang=lang)
+    await wait_msg.delete()
+    await message.answer(result, reply_markup=get_main_reply_menu())
+
+# --- 📊 5. Iqtisodiy Grafiklar Bo'limi ---
+@dp.message(F.text == "📊 Iqtisodiy grafiklar")
+async def btn_charts_handler(message: types.Message) -> None:
+    text = (
+        "📊 *Iqtisodiy Grafik va Diagrammalar Generatori*\n\n"
+        "Mustaqil ish yoki taqdimotingizga qo'shish uchun quyidagi diagrammalardan birini tanlang. "
+        "Bot uni yuqori sifatli rasm holida chizib beradi:"
+    )
+    await message.answer(text, reply_markup=get_chart_selection_menu(), parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("chart_"))
+async def chart_callback_handler(callback: types.CallbackQuery):
+    chart_type = callback.data.replace("chart_", "")
+    await callback.answer("Grafik chizilmoqda...")
+    
+    titles = {
+        "supply_demand": "Bozor Muvozanati (Talab va Taklif)",
+        "gdp_growth": "O'zbekiston YaIM o'sish sur'atlari dinamikasi",
+        "phillips": "Fillips egri chizig'i (Inflyatsiya va Ishsizlik)",
+        "sectors": "Iqtisodiyot tarmoqlarining YaIMdagi ulushi"
+    }
+    title = titles.get(chart_type, "Iqtisodiy Diagramma")
+    
+    chart_bytes = await asyncio.to_thread(generate_economic_chart, chart_type, title)
+    file_obj = BufferedInputFile(chart_bytes, filename=f"{chart_type}.png")
+    
+    await callback.message.answer_photo(
+        photo=file_obj,
+        caption=f"📈 *{title}*\n\nUshbu diagrammani bemalol mustaqil ishingizga yoki taqdimotingizga qo'yishingiz mumkin.",
+        parse_mode="Markdown"
+    )
+
+# --- 🎓 6. O'qituvchi Savollari (Simulyator) ---
+@dp.message(F.text == "🎓 O'qituvchi savollari")
+async def btn_teacher_handler(message: types.Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.waiting_for_teacher_topic)
+    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
+    await message.answer(
+        "🎓 *O'qituvchi bilan Suhbat Trenajyori*\n\n"
+        "O'qituvchingizga qaysi mavzudan javob bermoqchisiz? Mavzuni yozing:\n"
+        "Bot o'qituvchi berishi mumkin bo'lgan qiyin savollarni va namunali javoblarni chiqarib beradi!",
+        parse_mode="Markdown"
+    )
+
+@dp.message(BotStates.waiting_for_teacher_topic, F.text)
+async def teacher_topic_handler(message: types.Message, state: FSMContext) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    lang = await db.get_user_language(uid) if uid else "uz"
+    wait_msg = await message.answer("⏳ O'qituvchi berishi mumkin bo'lgan savollar tayyorlanmoqda...")
+    questions = await generate_teacher_questions(message.text, lang=lang)
+    await state.clear()
+    await wait_msg.delete()
+    await message.answer(questions, reply_markup=get_main_reply_menu())
+
+# --- ✍️ 7. Matn Tahrirlash Bo'limi ---
+@dp.message(F.text == "✍️ Matn tahrirlash")
+async def btn_proofread_handler(message: types.Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.waiting_for_proofread_text)
+    await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_reply_menu())
+    await message.answer(
+        "✍️ *Akademik Tahrirchi (Proofreading)*\n\n"
+        "O'zingiz yozgan xomaki matnni yuboring. Bot imloviy xatolarni tuzatadi va uni chiroyli ilmiy uslubga keltiradi:",
+        parse_mode="Markdown"
+    )
+
+@dp.message(BotStates.waiting_for_proofread_text, F.text)
+async def proofread_text_handler(message: types.Message, state: FSMContext) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    lang = await db.get_user_language(uid) if uid else "uz"
+    wait_msg = await message.answer("⏳ Matn tahrir qilinmoqda...")
+    edited = await proofread_text(message.text, lang=lang)
+    await state.clear()
+    await wait_msg.delete()
+    await message.answer(edited, reply_markup=get_main_reply_menu())
+
+# --- 🎧 8. TTS Audio Tinglash Callbacks ---
+@dp.callback_query(F.data.startswith("tts_play_"))
+async def tts_callback_handler(callback: types.CallbackQuery):
+    uid = int(callback.data.replace("tts_play_", ""))
+    essay_text = last_generated_essays.get(uid)
+    if not essay_text:
+        await callback.answer("⚠️ Audio tayyorlash uchun avval mustaqil ish generatsiya qiling.", show_alert=True)
+        return
+        
+    await callback.answer("🎧 Audio tayyorlanmoqda (10 soniya)...")
+    wait_msg = await callback.message.answer("⏳ Mustaqil ish audio shaklga o'tkazilmoqda...")
+    
+    lang = await db.get_user_language(uid)
+    audio_bytes = await asyncio.to_thread(generate_tts_audio, essay_text, lang)
+    await wait_msg.delete()
+    
+    if audio_bytes:
+        audio_file = BufferedInputFile(audio_bytes, filename="mustaqil_ish_audio.mp3")
+        await callback.message.answer_audio(
+            audio=audio_file,
+            caption="🎧 *Mustaqil ishning audio versiyasi*\n\nYo'lda darsga ketayotganda eshitib tayyorlanish uchun juda qulay!",
+            parse_mode="Markdown"
+        )
+    else:
+        await callback.message.answer("⚠️ Audioni tayyorlashda xatolik yuz berdi.")
+
+@dp.callback_query(F.data.startswith("exam_sim_"))
+async def exam_sim_callback_handler(callback: types.CallbackQuery):
+    uid = int(callback.data.replace("exam_sim_", ""))
+    essay_text = last_generated_essays.get(uid, "Iqtisodiyot")
+    await callback.answer("Savollar tayyorlanmoqda...")
+    wait_msg = await callback.message.answer("⏳ Ushbu mavzu bo'yicha imtihon savollari olinmoqda...")
+    lang = await db.get_user_language(uid)
+    questions = await generate_teacher_questions(essay_text[:200], lang=lang)
+    await wait_msg.delete()
+    await callback.message.answer(questions)
+
+# --- 👥 9. Referal Tizimi ---
+@dp.message(F.text == "👥 Referal (Do'stlar)")
+async def btn_referral_handler(message: types.Message) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    bot_info = await message.bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{uid}"
+    
+    user_data = await db.get_user(uid) or {}
+    count = user_data.get("referral_count", 0)
+    points = user_data.get("points", 0)
+    
+    text = (
+        f"👥 *Do'stlarni taklif qilish va Ballar yig'ish*\n\n"
+        f"Siz taklif qilgan do'stlar: *{count} ta*\n"
+        f"Sizning to'plagan ballaringiz: *{points} ball*\n\n"
+        f"🔗 *Sizning shaxsiy havolangiz:*\n`{ref_link}`\n\n"
+        f"💡 Ushbu havolani kursdoshlaringiz va talabalar guruhlariga yuboring. "
+        f"Har bir yangi do'stingiz uchun sizga +10 ball beriladi!"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+# --- 🌐 10. Tilni Tanlash ---
+@dp.message(F.text == "🌐 Tilni tanlash")
+async def btn_language_handler(message: types.Message) -> None:
+    await message.answer("Iltimos, o'zingizga qulay tilni tanlang:", reply_markup=get_languages_menu())
+
+@dp.callback_query(F.data.startswith("setlang_"))
+async def set_language_callback(callback: types.CallbackQuery):
+    lang_code = callback.data.replace("setlang_", "")
+    uid = callback.from_user.id
+    await db.set_user_language(uid, lang_code)
+    await callback.answer("Til muvaffaqiyatli o'zgartirildi!")
+    await callback.message.edit_text("✅ Til sozlamalari yangilandi. Endi bot siz tanlagan tilda javob beradi.")
+
+# --- 📩 11. Feedback (Fikr-mulohaza) ---
+@dp.message(Command("feedback"))
+async def feedback_command_handler(message: types.Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.waiting_for_feedback)
+    await message.answer("✍️ Iltimos, o'z fikr-mulohazangiz yoki taklifingizni bitta xabar qilib yozib yuboring:")
+
+@dp.message(BotStates.waiting_for_feedback)
+async def feedback_process_handler(message: types.Message, state: FSMContext, bot: Bot) -> None:
+    await state.clear()
+    uid = message.from_user.id
+    name = message.from_user.full_name
+    username = f"@{message.from_user.username}" if message.from_user.username else "mavjud emas"
+    
+    admin_text = (
+        f"📩 *Yangi Fikr-Mulohaza (Feedback)*\n\n"
+        f"👤 Kimdan: *{name}* ({username})\n"
+        f"🆔 ID: `{uid}`\n"
+        f"💬 Xabar:\n{message.text}"
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(chat_id=admin_id, text=admin_text, parse_mode="Markdown")
+        except Exception:
+            pass
+            
+    await message.answer("✅ Fikr-mulohazangiz adminga yetkazildi! Rahmat.")
+
+# --- 🔎 12. Inline Query Rejimi (@Soulbekbot ...) ---
+@dp.inline_query()
+async def inline_search_handler(inline_query: types.InlineQuery):
+    query = (inline_query.query or "").strip().lower()
+    results = []
+    
+    count = 0
+    for subj_id, data in knowledge_base.items():
+        title = data["title"]
+        for topic in data["topics"]:
+            if not query or query in title.lower() or query in topic.lower():
+                results.append(InlineQueryResultArticle(
+                    id=f"{subj_id}_{count}",
+                    title=f"{title}: {topic}",
+                    input_message_content=InputTextMessageContent(
+                        message_text=(
+                            f"📚 *Fan:* {title}\n"
+                            f"📝 *Mavzu:* {topic}\n\n"
+                            f"Ushbu mavzu bo'yicha to'liq mustaqil ish tayyorlash uchun @Soulbekbot ga kiring!"
+                        ),
+                        parse_mode="Markdown"
+                    ),
+                    description=f"{title} fani bo'yicha mustaqil ish mavzusi"
+                ))
+                count += 1
+                if count >= 8:
+                    break
+        if count >= 8:
+            break
+            
+    await inline_query.answer(results, cache_time=300)
+
+# --- 👑 13. Admin Buyruqlari (/broadcast, /ban, /unban) ---
+@dp.message(Command("broadcast"))
+async def broadcast_cmd_handler(message: types.Message, bot: Bot) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    if uid not in ADMIN_IDS:
+        return
+        
+    text_to_send = message.text.replace("/broadcast", "").strip()
+    if not text_to_send:
+        await message.answer("Xabar matnini kiriting: `/broadcast Xabar matni`", parse_mode="Markdown")
+        return
+        
+    wait_msg = await message.answer("⏳ Xabar barcha foydalanuvchilarga yuborilmoqda...")
+    res = await broadcast_message(bot, text_to_send)
+    await wait_msg.edit_text(f"✅ Xabar yuborildi!\n\nYetkazildi: *{res['sent']}* ta\nXatolik: *{res['failed']}* ta\nJami: *{res['total']}* ta", parse_mode="Markdown")
+
+@dp.message(Command("ban"))
+async def ban_cmd_handler(message: types.Message) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    if uid not in ADMIN_IDS:
+        return
+    args = message.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("Foydalanuvchi ID sini kiriting: `/ban 12345678`", parse_mode="Markdown")
+        return
+    target_id = int(args[1])
+    await db.set_ban_status(target_id, True)
+    await message.answer(f"🚫 Foydalanuvchi `{target_id}` qora ro'yxatga kiritildi.", parse_mode="Markdown")
+
+@dp.message(Command("unban"))
+async def unban_cmd_handler(message: types.Message) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    if uid not in ADMIN_IDS:
+        return
+    args = message.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("Foydalanuvchi ID sini kiriting: `/unban 12345678`", parse_mode="Markdown")
+        return
+    target_id = int(args[1])
+    await db.set_ban_status(target_id, False)
+    await message.answer(f"✅ Foydalanuvchi `{target_id}` qora ro'yxatdan chiqarildi.", parse_mode="Markdown")
+
+# --- ⚙️ Asosiy Navigatsiya & Mavzular ---
 @dp.callback_query(F.data == "back_to_main")
 async def back_main_handler(callback: types.CallbackQuery, state: FSMContext) -> None:
     await state.clear()
@@ -397,7 +681,7 @@ async def custom_topic_handler(callback: types.CallbackQuery, state: FSMContext)
     subj_title = knowledge_base[subj_id]["title"]
     
     await state.update_data(subject_title=subj_title)
-    await state.set_state(GenerateState.waiting_for_custom_topic)
+    await state.set_state(BotStates.waiting_for_custom_topic)
     
     try:
         await callback.message.edit_text(f"Yaxshi! *{subj_title}* fani bo'yicha o'z mavzusingizni matn qilib yozib yuboring:", parse_mode="Markdown")
@@ -405,7 +689,7 @@ async def custom_topic_handler(callback: types.CallbackQuery, state: FSMContext)
     except TelegramAPIError:
         pass
 
-@dp.message(GenerateState.waiting_for_custom_topic)
+@dp.message(BotStates.waiting_for_custom_topic)
 async def custom_topic_message_handler(message: types.Message, state: FSMContext) -> None:
     data = await state.get_data()
     subj_title = data.get("subject_title", "Tanlanmagan fan")
@@ -433,21 +717,98 @@ async def predefined_topic_handler(callback: types.CallbackQuery) -> None:
     except TelegramAPIError:
         pass
 
+# --- 📦 Backup Buyruqlari ---
+@dp.message(Command("stats"))
+async def stats_command_handler(message: types.Message) -> None:
+    stats = await db.get_stats()
+    b_state = await db.get_backup_state()
+    ch_info = b_state.get("channel", "@soul_backups")
+    db_type = "MongoDB Atlas (Bulut)" if db.is_connected else "Mahalliy Zaxira (JSON)"
+    text = (
+        f"📊 *Bot statistikasi:*\n\n"
+        f"👥 Foydalanuvchilar: *{stats.get('users', 0)}* ta\n"
+        f"📝 Tayyorlangan mustaqil ishlar: *{stats.get('requests', 0)}* ta\n"
+        f"🗄 Ma'lumotlar bazasi: *{db_type}*\n"
+        f"📦 Backup kanali: `{ch_info}`\n"
+        f"⚡ LRU Kesh: `{len(essay_cache)} ta mavzu`\n"
+        f"🌐 Keep-Alive Server: *Faol (/health va /admin)*"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message(Command("set_backup"))
+async def set_backup_handler(message: types.Message, bot: Bot) -> None:
+    args = message.text.split()
+    if len(args) < 2:
+        state = await db.get_backup_state()
+        current = state.get("channel", "@soul_backups")
+        await message.answer(
+            f"ℹ️ *Joriy backup kanali:* `{current}`\n\n"
+            "Yangi kanalni ulash uchun: `/set_backup @kanal_nomi`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    new_channel = args[1].strip()
+    await db.update_backup_state(channel=new_channel)
+    wait_msg = await message.answer(f"⏳ Backup kanali `{new_channel}` ga o'rnatildi. Birinchi zaxira nusxasi yuborilmoqda...", parse_mode="Markdown")
+    success = await perform_backup(bot, target_channel=new_channel)
+    if success:
+        await wait_msg.edit_text(f"✅ Kanal `{new_channel}` ga muvaffaqiyatli ulandi va birinchi GitHub zaxira nusxasi yuborildi!", parse_mode="Markdown")
+    else:
+        await wait_msg.edit_text(f"⚠️ Kanal `{new_channel}` ga saqlandi, ammo zaxirani yuborishda xatolik bo'ldi. Bot kanalda ADMIN ekanligini tekshiring.", parse_mode="Markdown")
+
+@dp.message(Command("backup"))
+async def trigger_backup_handler(message: types.Message, bot: Bot) -> None:
+    wait_msg = await message.answer("⏳ Yangi GitHub backup tayyorlanmoqda va kanalga yuborilmoqda...")
+    success = await perform_backup(bot)
+    if success:
+        state = await db.get_backup_state()
+        ch = state.get("channel", "@soul_backups")
+        await wait_msg.edit_text(f"✅ Yangi GitHub backup `{ch}` kanaliga yuborildi! (Eski backup o'chirildi).")
+    else:
+        await wait_msg.edit_text("❌ Backup yuborilmadi.")
+
+@dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=ADMINISTRATOR))
+async def bot_added_to_channel_handler(event: ChatMemberUpdated, bot: Bot):
+    chat = event.chat
+    if chat.type in ("channel", "supergroup"):
+        channel_identifier = f"@{chat.username}" if chat.username else str(chat.id)
+        logger.info(f"📢 Bot {chat.title} ({channel_identifier}) kanaliga admin qilindi!")
+        await db.update_backup_state(channel=channel_identifier)
+        await perform_backup(bot, target_channel=channel_identifier)
+
+@dp.message(F.forward_from_chat)
+async def forwarded_channel_message_handler(message: types.Message, bot: Bot):
+    chat = message.forward_from_chat
+    if chat and chat.type in ("channel", "supergroup"):
+        ch_id = str(chat.id)
+        title = chat.title or "Kanal"
+        await db.update_backup_state(channel=ch_id)
+        wait_msg = await message.answer(f"✅ Maxfiy kanal aniqlandi: *{title}* (ID: `{ch_id}`)\n\nBackup yuborilmoqda...", parse_mode="Markdown")
+        success = await perform_backup(bot, target_channel=ch_id)
+        if success:
+            await wait_msg.edit_text(f"✅ *{title}* kanaliga muvaffaqiyatli ulandi va birinchi GitHub zaxira nusxasi yuborildi!", parse_mode="Markdown")
+        else:
+            await wait_msg.edit_text(f"⚠️ Kanal ID si `{ch_id}` saqlandi, ammo bot xabar yubora olmadi.", parse_mode="Markdown")
+
 # ==============================================================================
-# 🚀 SYSTEM ENTRY (POLLING + WEB SERVER CONCURRENTLY)
+# 🚀 SYSTEM ENTRY (POLLING + WEB SERVER + BACKUP SCHEDULER)
 # ==============================================================================
 async def main() -> None:
     bot = Bot(BOT_TOKEN)
-    logger.info("Bot ishga tushirilmoqda... [FATHER MODE v6.0]")
+    logger.info("Bot ishga tushirilmoqda... [FATHER MODE v6.0 SUPER-SUITE]")
     
     # 1. MongoDB bazaga ulanish
     await db.connect()
     
-    # 2. Render & cron-job.org uchun /health veb-serverini ishga tushirish
+    # 2. Render & cron-job.org uchun /health va /admin veb-serverini ishga tushirish
     web_runner = await start_web_server()
     
     # 3. Har 30 minutda GitHub Backup yuboruvchi fon xizmati
     backup_task = asyncio.create_task(backup_scheduler_loop(bot))
+    
+    # 4. Kunlik hisobot xizmati
+    daily_task = asyncio.create_task(daily_report_scheduler(bot))
     
     try:
         logger.info("🤖 Polling boshlandi...")
@@ -456,6 +817,7 @@ async def main() -> None:
         logger.critical(f"FATAL ERROR: {e}")
     finally:
         backup_task.cancel()
+        daily_task.cancel()
         await web_runner.cleanup()
         await bot.session.close()
 
