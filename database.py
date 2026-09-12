@@ -18,6 +18,7 @@ class DatabaseManager:
         self.db = None
         self.users_col = None
         self.logs_col = None
+        self.settings_col = None
         self.is_connected = False
 
     async def connect(self):
@@ -25,11 +26,11 @@ class DatabaseManager:
         if MONGO_URI and "mongodb" in MONGO_URI:
             try:
                 self.client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-                # Verify connection
                 await self.client.admin.command('ping')
                 self.db = self.client.get_database("soulbekbot_db")
                 self.users_col = self.db.get_collection("users")
                 self.logs_col = self.db.get_collection("requests")
+                self.settings_col = self.db.get_collection("settings")
                 self.is_connected = True
                 logger.info("✅ MongoDB Atlas ga muvaffaqiyatli ulandi!")
                 return
@@ -40,9 +41,8 @@ class DatabaseManager:
             logger.info("ℹ️ MONGO_URI ko'rsatilmagan. Mahalliy JSON baza ishlatiladi.")
             self.is_connected = False
 
-        # Initialize local JSON file if needed
         if not os.path.exists(LOCAL_DB_FILE):
-            self._save_local({"users": {}, "requests": []})
+            self._save_local({"users": {}, "requests": [], "backup_state": {}})
 
     def _load_local(self) -> Dict[str, Any]:
         try:
@@ -51,7 +51,7 @@ class DatabaseManager:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Mahalliy bazani o'qishda xatolik: {e}")
-        return {"users": {}, "requests": []}
+        return {"users": {}, "requests": [], "backup_state": {}}
 
     def _save_local(self, data: Dict[str, Any]):
         try:
@@ -61,7 +61,6 @@ class DatabaseManager:
             logger.error(f"Mahalliy bazaga yozishda xatolik: {e}")
 
     async def add_or_update_user(self, user_id: int, full_name: str, username: Optional[str] = None):
-        """Save or update user in database."""
         now = datetime.now().isoformat()
         user_data = {
             "user_id": user_id,
@@ -81,11 +80,12 @@ class DatabaseManager:
             except Exception as e:
                 logger.error(f"MongoDB foydalanuvchi saqlashda xato: {e}")
 
-        # Local fallback
         data = self._load_local()
         uid = str(user_id)
-        if uid not in data["users"]:
+        if uid not in data.get("users", {}):
             user_data["joined_at"] = now
+            if "users" not in data:
+                data["users"] = {}
             data["users"][uid] = user_data
         else:
             data["users"][uid]["last_active"] = now
@@ -94,7 +94,6 @@ class DatabaseManager:
         self._save_local(data)
 
     async def log_request(self, user_id: int, subject: str, topic: str):
-        """Log essay request to database."""
         now = datetime.now().isoformat()
         log_entry = {
             "user_id": user_id,
@@ -110,13 +109,13 @@ class DatabaseManager:
             except Exception as e:
                 logger.error(f"MongoDB log saqlashda xato: {e}")
 
-        # Local fallback
         data = self._load_local()
+        if "requests" not in data:
+            data["requests"] = []
         data["requests"].append(log_entry)
         self._save_local(data)
 
     async def get_stats(self) -> Dict[str, int]:
-        """Get statistics of users and requests."""
         if self.is_connected and self.users_col is not None and self.logs_col is not None:
             try:
                 total_users = await self.users_col.count_documents({})
@@ -125,11 +124,47 @@ class DatabaseManager:
             except Exception as e:
                 logger.error(f"MongoDB stats xatolik: {e}")
 
-        # Local fallback
         data = self._load_local()
         return {
             "users": len(data.get("users", {})),
             "requests": len(data.get("requests", []))
         }
+
+    async def get_backup_state(self) -> Dict[str, Any]:
+        """Get backup channel and last sent message ID."""
+        if self.is_connected and self.settings_col is not None:
+            try:
+                doc = await self.settings_col.find_one({"key": "backup_state"})
+                if doc:
+                    return doc.get("value", {})
+            except Exception as e:
+                logger.error(f"MongoDB backup_state olishda xato: {e}")
+
+        data = self._load_local()
+        return data.get("backup_state", {})
+
+    async def update_backup_state(self, channel: Optional[str] = None, last_message_id: Optional[int] = None):
+        """Update backup channel and/or last sent message ID."""
+        current = await self.get_backup_state()
+        if channel is not None:
+            current["channel"] = channel
+        if last_message_id is not None:
+            current["last_message_id"] = last_message_id
+        current["updated_at"] = datetime.now().isoformat()
+
+        if self.is_connected and self.settings_col is not None:
+            try:
+                await self.settings_col.update_one(
+                    {"key": "backup_state"},
+                    {"$set": {"key": "backup_state", "value": current}},
+                    upsert=True
+                )
+                return
+            except Exception as e:
+                logger.error(f"MongoDB backup_state saqlashda xato: {e}")
+
+        data = self._load_local()
+        data["backup_state"] = current
+        self._save_local(data)
 
 db = DatabaseManager()
