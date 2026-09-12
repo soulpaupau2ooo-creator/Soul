@@ -8,8 +8,11 @@ from typing import List, Dict, Any, Optional
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import CommandStart, Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, ADMINISTRATOR
+from aiogram.types import (
+    InlineKeyboardMarkup, InlineKeyboardButton, 
+    ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramAPIError
@@ -17,6 +20,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 from database import db
+from backup_manager import backup_scheduler_loop, perform_backup
 
 # ==============================================================================
 # 🛠️ KONFIGURATSIYA VA YADRO (FATHER MODE v6.0)
@@ -243,15 +247,70 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
 @dp.message(Command("stats"))
 async def stats_command_handler(message: types.Message) -> None:
     stats = await db.get_stats()
+    b_state = await db.get_backup_state()
+    ch_info = b_state.get("channel", "Belgilanmagan")
     db_type = "MongoDB Atlas (Bulut)" if db.is_connected else "Mahalliy Zaxira (JSON)"
     text = (
         f"📊 *Bot statistikasi:*\n\n"
         f"👥 Foydalanuvchilar: *{stats.get('users', 0)}* ta\n"
         f"📝 Tayyorlangan mustaqil ishlar: *{stats.get('requests', 0)}* ta\n"
         f"🗄 Ma'lumotlar bazasi: *{db_type}*\n"
+        f"📦 Backup kanali: `{ch_info}`\n"
         f"🌐 Keep-Alive Server: *Faol (/health)*"
     )
     await message.answer(text, parse_mode="Markdown")
+
+@dp.message(Command("set_backup"))
+async def set_backup_handler(message: types.Message, bot: Bot) -> None:
+    args = message.text.split()
+    if len(args) < 2:
+        state = await db.get_backup_state()
+        current = state.get("channel", "Belgilanmagan")
+        await message.answer(
+            f"ℹ️ *Joriy backup kanali:* `{current}`\n\n"
+            "Yangi kanalni ulash uchun kanal username yoki ID sini yuboring:\n"
+            "Masalan: `/set_backup @kanal_nomi` yoki `/set_backup -1001234567890`\n\n"
+            "⚠️ Bot ushbu kanalda ADMIN bo'lishi va xabar yozish ruxsati berilgan bo'lishi shart!",
+            parse_mode="Markdown"
+        )
+        return
+        
+    new_channel = args[1].strip()
+    await db.update_backup_state(channel=new_channel)
+    wait_msg = await message.answer(f"⏳ Backup kanali `{new_channel}` ga o'rnatildi. Birinchi zaxira nusxasi yuborilmoqda...", parse_mode="Markdown")
+    success = await perform_backup(bot, target_channel=new_channel)
+    if success:
+        await wait_msg.edit_text(
+            f"✅ Kanal `{new_channel}` ga muvaffaqiyatli ulandi va birinchi GitHub zaxira nusxasi yuborildi!\n\n"
+            "⏱ Endi bot har 30 daqiqada yangi backup yuborib, kanal toza turishi uchun avvalgisini avtomatik o'chirib boradi.",
+            parse_mode="Markdown"
+        )
+    else:
+        await wait_msg.edit_text(
+            f"⚠️ Kanal `{new_channel}` ga saqlandi, lekin zaxirani yuborishda xatolik bo'ldi.\n\n"
+            "Iltimos, bot o'sha kanalda ADMIN ekanligini va unga *Post Messages* (xabar yozish) huquqi berilganligini tekshiring.",
+            parse_mode="Markdown"
+        )
+
+@dp.message(Command("backup"))
+async def trigger_backup_handler(message: types.Message, bot: Bot) -> None:
+    wait_msg = await message.answer("⏳ Yangi GitHub backup tayyorlanmoqda va kanalga yuborilmoqda...")
+    success = await perform_backup(bot)
+    if success:
+        state = await db.get_backup_state()
+        ch = state.get("channel", "kanal")
+        await wait_msg.edit_text(f"✅ Yangi GitHub backup `{ch}` kanaliga yuborildi! (Eski backup o'chirildi).")
+    else:
+        await wait_msg.edit_text("❌ Backup yuborilmadi. Avval `/set_backup @kanal_nomi` buyrug'i bilan kanalni sozlang.")
+
+@dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=ADMINISTRATOR))
+async def bot_added_to_channel_handler(event: ChatMemberUpdated, bot: Bot):
+    chat = event.chat
+    if chat.type in ("channel", "supergroup"):
+        channel_identifier = f"@{chat.username}" if chat.username else str(chat.id)
+        logger.info(f"📢 Bot {chat.title} ({channel_identifier}) kanaliga admin qilindi!")
+        await db.update_backup_state(channel=channel_identifier)
+        await perform_backup(bot, target_channel=channel_identifier)
 
 @dp.message(F.text == "⬅️ Orqaga")
 async def main_menu_handler(message: types.Message, state: FSMContext) -> None:
@@ -354,12 +413,16 @@ async def main() -> None:
     # 2. Render & cron-job.org uchun /health veb-serverini ishga tushirish
     web_runner = await start_web_server()
     
+    # 3. Har 30 minutda GitHub Backup yuboruvchi fon xizmati
+    backup_task = asyncio.create_task(backup_scheduler_loop(bot))
+    
     try:
         logger.info("🤖 Polling boshlandi...")
         await dp.start_polling(bot)
     except Exception as e:
         logger.critical(f"FATAL ERROR: {e}")
     finally:
+        backup_task.cancel()
         await web_runner.cleanup()
         await bot.session.close()
 
