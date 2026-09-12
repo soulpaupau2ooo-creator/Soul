@@ -85,7 +85,7 @@ async def perform_backup(bot: Bot, target_channel: Optional[str] = None) -> bool
 
     # 3. Send new backup message
     caption = (
-        f"📦 *Soulbekbot — GitHub Zaxira Nusxasi (Backup)*\n\n"
+        f"📦 *Mustaqil Ish Bot — GitHub Zaxira Nusxasi (Backup)*\n\n"
         f"📅 *Vaqt:* `{now_str}`\n"
         f"📂 *Ombor:* `{GITHUB_REPO}`\n"
         f"🔖 *Commit:* `{sha}`\n"
