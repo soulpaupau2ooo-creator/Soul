@@ -42,41 +42,39 @@ async def request_ai_fast(prompt: str) -> str:
 
 async def solve_economic_problem(problem_text: str, lang: str = "uz") -> str:
     prompt = (
-        f"Sen oliy toifali iqtisodiyot professori va matematika-iqtisodiyot bo'yicha eksportsan. "
-        f"Quyidagi iqtisodiy masalani eng sodda, tushunarli va bosqichma-bosqich yechib ber:\n\n"
-        f"Masala matni:\n{problem_text}\n\n"
-        f"Qoidalar:\n"
-        f"1. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Rus tili' if lang == 'ru' else 'Ingliz tili'}.\n"
-        f"2. Bosqichlar: 1) Berilgan ma'lumotlar, 2) Qo'llaniladigan formula(lar), 3) Hisoblash jarayoni, 4) Aniq yakuniy javob va iqtisodiy xulosa.\n"
-        f"3. Telegramda o'qish qulay bo'lishi uchun hech qanday xato formatlash belgilarisiz yoz."
+        f"Foydalanuvchining iqtisodiy savoliga yoki masalasiga juda qisqa, oddiy, tushunarli va lo'nda javob ber.\n\n"
+        f"Savol/Masala:\n{problem_text}\n\n"
+        f"Qat'iy qoidalar:\n"
+        f"1. Ortiqcha salomlashish, kirish yoki suv gaplar (masalan: 'Assalomu alaykum, ushbu fundamental masala...') QAT'IYAN YOZILMASIN. To'g'ridan-to'g'ri mohiyatdan boshla.\n"
+        f"2. Qisqa va lo'nda bo'lsin (maksimum 4-8 ta gap).\n"
+        f"3. Hech qanday yulduzcha (**), panjara (###) yoki qalin harf ishlatma! Faqat oddiy toza matn bo'lsin.\n"
+        f"4. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Русский язык' if lang == 'ru' else 'English'}."
     )
     return await request_ai_fast(prompt)
 
 async def generate_teacher_questions(topic: str, lang: str = "uz") -> str:
     prompt = (
-        f"Sen qattiqqo'l universitet iqtisodiyot professori rolidasan. "
-        f"Talaba '{topic}' mavzusida mustaqil ish topshirdi. "
-        f"Shu mavzu bo'yicha talabaning bilimi va mustaqil tayyorlaganini tekshirish uchun o'qituvchi berishi mumkin bo'lgan "
-        f"3-4 ta eng muhim, chuqur va kutilmagan savollarni hamda talaba qanday mukammal javob berishi kerakligini (namunaviy javoblari bilan) yozib ber.\n\n"
-        f"Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Rus tili' if lang == 'ru' else 'Ingliz tili'}."
+        f"Talabaning '{topic}' mavzusi bo'yicha o'qituvchi berishi mumkin bo'lgan 3 ta eng asosiy qiyin savolni va ularning qisqa, aniq namunali javoblarini yozib ber.\n\n"
+        f"Qoidalar:\n"
+        f"1. Kirish gaplarsiz to'g'ridan-to'g'ri 1, 2, 3 qilib savol va javoblarni ber.\n"
+        f"2. Hech qanday maxsus belgilarsiz (yulduzcha, panjara) toza oddiy matn bo'lsin.\n"
+        f"3. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Русский язык' if lang == 'ru' else 'English'}."
     )
     return await request_ai_fast(prompt)
 
 async def summarize_article(article_text: str, lang: str = "uz") -> str:
     prompt = (
-        f"Quyidagi iqtisodiy matn/maqolani tahlil qilib, uning eng muhim mag'zini 1 betlik ixcham ilmiy xulosa (Summary) shaklida tayyorlab ber.\n\n"
-        f"Matn:\n{article_text[:6000]}\n\n"
-        f"Tuzilishi: 1. Asosiy g'oya va muammo, 2. Eng muhim fakt va ko'rsatkichlar, 3. Xulosa va amaliy takliflar.\n"
-        f"Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Rus tili' if lang == 'ru' else 'Ingliz tili'}."
+        f"Quyidagi matnning eng asosiy 3-4 ta xulosasini qisqa va lo'nda qilib yozib ber:\n\n"
+        f"{article_text[:5000]}\n\n"
+        f"Qoidalar: Ortiqcha so'zlarsiz, faqat eng muhim fikrlar, oddiy toza matn (yulduzchasiz)."
     )
     return await request_ai_fast(prompt)
 
 async def proofread_text(draft_text: str, lang: str = "uz") -> str:
     prompt = (
-        f"Quyidagi talaba yozgan matnni tahrir qil (Proofreading). "
-        f"Grammatik, imloviy va punktuatsion xatolarni to'g'irla, so'zlarni ilmiy-akademik uslubga moslashtir va ravon o'qiladigan holatga keltir:\n\n"
+        f"Quyidagi matndagi imlo va grammatika xatolarini tuzatib, ravon va ilmiy qilib qayta yozib ber:\n\n"
         f"{draft_text[:5000]}\n\n"
-        f"Faqat to'g'rilangan yakuniy matnni va qisqacha nimalar yaxshilangani haqida 1-2 qator izoh ber."
+        f"Hech qanday izohlarsiz, faqat to'g'rilangan toza matnni qaytar (yulduzcha va belgilarsiz)."
     )
     return await request_ai_fast(prompt)
 
