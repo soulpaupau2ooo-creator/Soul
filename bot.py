@@ -267,16 +267,17 @@ async def request_ai_content(prompt: str) -> str:
         raise last_exception
     return "Xatolik."
 
-async def generate_essay(message: types.Message, subject: str, topic: str) -> None:
+async def generate_essay(message: types.Message, subject: str, topic: str, wait_msg: Optional[types.Message] = None) -> None:
     user_id = message.from_user.id if message.from_user else 0
     if not API_KEYS:
         await message.answer("⚠️ Sun'iy Intelekt qismi (Brain) ulanmagan. Iltimos, ma'muriyatga xabar bering.")
         return
         
-    wait_msg = await message.answer(
-        f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida qisqa va lo'nda mustaqil ish tayyorlanmoqda...",
-        parse_mode="Markdown"
-    )
+    if wait_msg is None:
+        wait_msg = await message.answer(
+            f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida qisqa va lo'nda mustaqil ish tayyorlanmoqda...",
+            parse_mode="Markdown"
+        )
     
     lang = await db.get_user_language(user_id) if user_id else "uz"
     prompt = build_academic_essay_prompt(subject_title=subject, topic=topic, lang=lang)
@@ -301,30 +302,42 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
         else:
             await message.answer(text, reply_markup=get_essay_action_menu(user_id))
             
-        await wait_msg.delete()
+        if wait_msg:
+            try:
+                await wait_msg.delete()
+            except Exception:
+                pass
         
     except ValueError as ve:
-        await wait_msg.edit_text("⚠️ AI ulanishida uzilish yuz berdi. Iltimos, keyinroq urinib ko'ring.")
+        if wait_msg:
+            try:
+                await wait_msg.edit_text("⚠️ AI ulanishida uzilish yuz berdi. Iltimos, keyinroq urinib ko'ring.")
+            except Exception:
+                pass
         logger.error(f"Value Error: {ve}")
     except Exception as e:
         logger.error(f"Initial attempt error: {e}")
         # Father Mode: Automatic rapid retry with backoff
         try:
-            await asyncio.sleep(2)
+            await asyncio.sleep(1.5)
             retry_text = await request_ai_content(prompt)
             if user_id:
                 last_generated_essays[user_id] = retry_text
-            await wait_msg.delete()
+            if wait_msg:
+                try:
+                    await wait_msg.delete()
+                except Exception:
+                    pass
             await message.answer(retry_text, reply_markup=get_essay_action_menu(user_id))
             return
         except Exception as retry_e:
             logger.error(f"Retry failed: {retry_e}")
             
-        error_str = str(e).lower()
-        if "429" in error_str or "quota" in error_str:
-            await wait_msg.edit_text("⏳ Tarmoqda qisqa tirbandlik. Iltimos, tugmani yana bir bor bosing.")
-        else:
-            await wait_msg.edit_text("⚠️ Texnik xatolik yuz berdi. Iltimos, boshqa mavzu tanlab ko'ring.")
+        if wait_msg:
+            try:
+                await wait_msg.edit_text("⚠️ Texnik tirbandlik yuz berdi. Iltimos, tugmani yana bir bor bosing.")
+            except Exception:
+                pass
 
 # ==============================================================================
 # 🎮 XABARLAR YUKLATGICHI (HANDLERS)
@@ -952,7 +965,7 @@ async def custom_topic_photo_handler(message: types.Message, state: FSMContext, 
             )
         except Exception:
             pass
-        await generate_essay(message, subj_title, clean_topic)
+        await generate_essay(message, subj_title, clean_topic, wait_msg=wait_msg)
         await state.clear()
     else:
         try:
