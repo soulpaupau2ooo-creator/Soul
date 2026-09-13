@@ -61,6 +61,48 @@ async def process_photo_problem(bot: Bot, photo: types.PhotoSize, lang: str = "u
         logger.error(f"Rasm tahlilida xatolik: {e}")
         return f"⚠️ Rasmni tahlil qilishda texnik xatolik: {e}"
 
+async def extract_topic_from_photo(bot: Bot, photo: types.PhotoSize, subject_title: str = "Iqtisodiyot", lang: str = "uz") -> str:
+    """Download photo from Telegram and extract the essay topic/title using Gemini Vision OCR."""
+    try:
+        file_info = await bot.get_file(photo.file_id)
+        if not file_info.file_path:
+            return ""
+            
+        file_bytes = io.BytesIO()
+        await bot.download_file(file_info.file_path, destination=file_bytes)
+        file_bytes.seek(0)
+        image_data = file_bytes.read()
+
+        model = get_genai_model()
+        if not model:
+            return ""
+
+        prompt = (
+            f"Sen akademik OCR va sun'iy intellekt tahlilchisisan. "
+            f"Talaba '{subject_title}' fani bo'yicha mustaqil ish (referat) yozish uchun rasm yubordi. "
+            f"Bu rasmda daftar, kitob mundarijasi, sillabus yoki ekrandagi mavzu ko'rsatilgan.\n\n"
+            f"Topshiriq: Rasm ichidagi asosiy mustaqil ish MAVZUSI yoki savolini aniq ajratib ol.\n"
+            f"Qat'iy qoidalar:\n"
+            f"1. Faqat aniqlangan mavzuni (bitta qisqa sarlavha ko'rinishida) qaytar.\n"
+            f"2. Hech qanday ortiqcha kirish, salomlashish yoki tushuntirish yozma. Faqat mavzuning toza matnini qaytar.\n"
+            f"3. Hech qanday yulduzcha (*), panjara (#) ishlatma.\n"
+            f"4. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Русский язык' if lang == 'ru' else 'English'}."
+        )
+
+        image_part = {
+            "mime_type": "image/jpeg",
+            "data": image_data
+        }
+
+        response = await asyncio.to_thread(model.generate_content, [prompt, image_part])
+        if response and response.text:
+            cleaned = response.text.strip().replace("*", "").replace("#", "")
+            return cleaned
+        return ""
+    except Exception as e:
+        logger.error(f"Error extracting topic from photo: {e}")
+        return ""
+
 async def process_voice_topic(bot: Bot, voice: types.Voice, lang: str = "uz") -> str:
     """Download voice note and transcribe/process with Gemini multimodal."""
     try:
