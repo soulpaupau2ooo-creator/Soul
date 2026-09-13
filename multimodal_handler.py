@@ -17,9 +17,10 @@ API_KEYS_STR = os.getenv("GEMINI_API_KEYS", "")
 API_KEYS: List[str] = [k.strip() for k in API_KEYS_STR.split(",") if k.strip()]
 
 VISION_MODELS = [
-    'gemini-2.5-flash',
-    'gemini-flash-latest',
-    'gemini-2.5-flash-lite'
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite-preview'
 ]
 
 async def _call_gemini_vision(prompt: str, pil_img: Image.Image) -> Optional[str]:
@@ -167,13 +168,17 @@ async def process_voice_topic(bot: Bot, voice: types.Voice, lang: str = "uz") ->
         for key in shuffled:
             try:
                 genai.configure(api_key=key)
-                model = genai.GenerativeModel('gemini-flash-latest')
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(model.generate_content, [prompt, audio_part]),
-                    timeout=25.0
-                )
-                if response and response.text:
-                    return response.text
+                for v_model in ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite']:
+                    try:
+                        model = genai.GenerativeModel(v_model)
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(model.generate_content, [prompt, audio_part]),
+                            timeout=25.0
+                        )
+                        if response and response.text:
+                            return response.text
+                    except Exception:
+                        continue
             except Exception as e:
                 logger.warning(f"Voice processing error: {e}")
                 continue

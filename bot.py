@@ -209,11 +209,10 @@ async def start_web_server():
 # 🤖 YUKORI DARAJADAGI AI VA KESH (RESILIENCE + LRU CACHE)
 # ==============================================================================
 CANDIDATE_MODELS: List[str] = [
-    'gemini-2.5-flash',
-    'gemini-flash-latest',
-    'gemini-2.5-flash-lite',
     'gemini-flash-lite-latest',
-    'gemini-3.5-flash'
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite-preview'
 ]
 
 async def request_ai_content(prompt: str) -> str:
