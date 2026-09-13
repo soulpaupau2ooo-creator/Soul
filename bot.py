@@ -198,8 +198,15 @@ async def start_web_server():
 # ==============================================================================
 # 🤖 YUKORI DARAJADAGI AI VA KESH (RESILIENCE + LRU CACHE)
 # ==============================================================================
+CANDIDATE_MODELS: List[str] = [
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.6-flash',
+    'gemini-flash-latest'
+]
+
 async def request_ai_content(prompt: str) -> str:
-    """Asynchronous AI request with robust round-robin API Key rotation and LRU caching."""
+    """Asynchronous AI request with robust round-robin API Key rotation, multi-model cascade, and LRU caching."""
     cache_key = prompt.strip()
     if cache_key in essay_cache:
         logger.info("⚡ Javob keshdan olindi (Cache Hit)!")
@@ -216,25 +223,35 @@ async def request_ai_content(prompt: str) -> str:
     for attempt, current_key in enumerate(shuffled_keys):
         try:
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel('gemini-flash-latest')
-            response = await asyncio.to_thread(model.generate_content, prompt)
-            
-            if not response or not response.text:
-                raise ValueError("Bosh javob olindi.")
+        except Exception as ce:
+            logger.warning(f"Key {attempt+1} configure error: {ce}")
+            continue
+
+        for model_name in CANDIDATE_MODELS:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(model.generate_content, prompt),
+                    timeout=25.0
+                )
                 
-            result_text = response.text
-            essay_cache[cache_key] = result_text
-            return result_text
-            
-        except Exception as e:
-            last_exception = e
-            error_str = str(e).lower()
-            logger.warning(f"AI Error on attempt {attempt+1}: {error_str}")
-            
-            if "429" in error_str or "quota" in error_str:
-                if attempt < len(shuffled_keys) - 1:
-                    await asyncio.sleep(2)
+                if response and response.text:
+                    result_text = response.text
+                    essay_cache[cache_key] = result_text
+                    logger.info(f"[SUCCESS] AI muvaffaqiyatli: {model_name} (Kalit: {attempt+1})")
+                    return result_text
+                    
+            except Exception as me:
+                last_exception = me
+                err_lower = str(me).lower()
+                logger.warning(f"Model {model_name} xatosi: {err_lower[:90]}")
+                if "429" in err_lower or "quota" in err_lower or "404" in err_lower:
                     continue
+                else:
+                    continue
+                    
+        if attempt < len(shuffled_keys) - 1:
+            await asyncio.sleep(1)
             
     if last_exception:
         raise last_exception
@@ -284,12 +301,24 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
         await wait_msg.edit_text("⚠️ AI ulanishida uzilish yuz berdi. Iltimos, keyinroq urinib ko'ring.")
         logger.error(f"Value Error: {ve}")
     except Exception as e:
+        logger.error(f"Initial attempt error: {e}")
+        # Father Mode: Automatic rapid retry with backoff
+        try:
+            await asyncio.sleep(2)
+            retry_text = await request_ai_content(prompt)
+            if user_id:
+                last_generated_essays[user_id] = retry_text
+            await wait_msg.delete()
+            await message.answer(retry_text, reply_markup=get_essay_action_menu(user_id))
+            return
+        except Exception as retry_e:
+            logger.error(f"Retry failed: {retry_e}")
+            
         error_str = str(e).lower()
         if "429" in error_str or "quota" in error_str:
-            await wait_msg.edit_text("⏳ Serverlar band. Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring.")
+            await wait_msg.edit_text("⏳ Tarmoqda qisqa tirbandlik. Iltimos, tugmani yana bir bor bosing.")
         else:
             await wait_msg.edit_text("⚠️ Texnik xatolik yuz berdi. Iltimos, boshqa mavzu tanlab ko'ring.")
-        logger.error(f"Unhandled Exception: {e}")
 
 # ==============================================================================
 # 🎮 XABARLAR YUKLATGICHI (HANDLERS)
