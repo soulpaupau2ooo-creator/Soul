@@ -12,7 +12,8 @@ from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, ADMI
 from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, 
     ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated,
-    BufferedInputFile, InlineQueryResultArticle, InputTextMessageContent
+    BufferedInputFile, InlineQueryResultArticle, InputTextMessageContent,
+    BotCommand, BotCommandScopeDefault
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -30,6 +31,16 @@ from multimodal_handler import process_photo_problem, process_voice_topic, gener
 from admin_suite import (
     web_admin_dashboard_handler, broadcast_message, send_daily_report,
     daily_report_scheduler, is_rate_limited, essay_cache, ADMIN_IDS
+)
+from economics_curriculum import (
+    CATEGORIES as categories,
+    KNOWLEDGE_BASE as knowledge_base,
+    UZBEKISTAN_MACRO_INDICATORS,
+    get_category_subjects,
+    get_subject_info,
+    get_subject_topics,
+    get_macro_stats_text,
+    build_academic_essay_prompt
 )
 
 # ==============================================================================
@@ -58,93 +69,6 @@ class BotStates(StatesGroup):
 last_generated_essays: Dict[int, str] = {}
 
 # ==============================================================================
-# 📚 MA'LUMOTLAR BAZASI (KNOWLEDGE BASE)
-# ==============================================================================
-# ==============================================================================
-# 📚 MA'LUMOTLAR BAZASI (KNOWLEDGE BASE) - 24 TA BARCHA IQTISODIYOT FANLARI
-# ==============================================================================
-knowledge_base: Dict[str, Dict[str, Any]] = {
-    # 🏛 1. Nazariy va Umumiy Iqtisodiyot
-    "iqt_nazariya": {"title": "Iqtisodiyot nazariyasi", "topics": ["Bozor mexanizmi va uning elementlari", "Iqtisodiy tizimlar va ularning modellari", "Mulkiy munosabatlar va mulkchilik shakllari", "Ishlab chiqarish omillari va resurslar", "Iqtisodiy o'sish va rivojlanish omillari"]},
-    "makro": {"title": "Makroiqtisodiyot", "topics": ["Yalpi ichki mahsulot va uni hisoblash usullari", "Inflyatsiya va ishsizlik muammolari", "Davlat byudjeti va soliq-byudjet siyosati", "Makroiqtisodiy muvozanat (AD-AS modeli)", "Monetar siyosat va pul massasi"]},
-    "mikro": {"title": "Mikroiqtisodiyot", "topics": ["Talab va taklif elastikligi qonuniyati", "Iste'molchi xulq-atvori va naflilik nazariyasi", "Ishlab chiqarish xarajatlari va daromadlar", "Mukammal va nomukammal raqobat bozorlari", "Monopoliya va uning oqibatlari"]},
-    "talimotlar": {"title": "Iqtisodiy ta'limotlar tarixi", "topics": ["Klassik iqtisodiy maktab (A. Smit, D. Rikardo)", "Keynschilik nazariyasi va davlat aralashuvi", "Monetarizm va M. Fridmen qarashlari", "Institutsional iqtisodiyot asoslari", "Fiziokratlar va merkantilizm maktablari"]},
-    "ekonometrika": {"title": "Ekonometrika va modellashtirish", "topics": ["Bir va ko'p omilli chiziqli regressiya modellari", "Geteroskedastiklik va avtokorrelyatsiya", "Vaqt qatorlari va ularni tekshirish", "Iqtisodiy jarayonlarni ekonometrik bashoratlash"]},
-    "statistika": {"title": "Statistika va ma'lumotlar tahlili", "topics": ["Statistik kuzatish va ma'lumotlarni guruhlash", "O'rtacha va variatsiya ko'rsatkichlari", "Iqtisodiy indekslar nazariyasi va amaliyoti", "Aholi va mehnat bozori statistikasi"]},
-
-    # 💰 2. Moliya, Bank va Soliq
-    "moliya": {"title": "Moliya va moliyaviy tahlil", "topics": ["Korxona moliyasi va moliyaviy resurslar", "Moliyaviy hisobotlar tahlili (Balans, Foyda)", "Moliya bozori va moliyaviy vositalar", "Xalqaro moliya arxitekturasi"]},
-    "bank": {"title": "Bank ishi va kredit", "topics": ["Markaziy bank va pul-kredit siyosati", "Tijorat banklarining aktiv va passiv operatsiyalari", "Bank kreditlash tizimi va kredit risklari", "Raqamli banking va to'lov tizimlari"]},
-    "buxgalteriya": {"title": "Buxgalteriya hisobi va audit", "topics": ["Buxgalteriya balansi va ikkiyoqlama yozuv", "Asosiy vositalar va nomoddiy aktivlar hisobi", "Mahsulot tannarxi va ishlab chiqarish xarajatlari", "Moliyaviy hisobot auditi va audit standartlari"]},
-    "soliq": {"title": "Soliq va soliqqa tortish", "topics": ["O'zbekiston soliq tizimi va soliq qonunchiligi", "Foyda solig'i va qo'shilgan qiymat solig'i (QQS)", "To'g'ridan-to'g'ri va egri soliqlar tahlili", "Soliq ma'muriyatchiligi va soliq tekshiruvlari"]},
-    "qimmatli_qogoz": {"title": "Qimmatli qog'ozlar va moliya bozorlari", "topics": ["Aksiyalar va obligatsiyalar bozori", "Fond birjasi va uning infratuzilmasi", "Investitsiya portfeli va risklarni boshqarish", "Derivativlar va hosilaviy qimmatli qog'ozlar"]},
-    "davlat_moliyasi": {"title": "Davlat moliyasi va byudjet", "topics": ["Davlat byudjetining shakllanishi va xarajatlari", "Byudjet taqchilligi va uni qoplash manbalari", "Davlat qarzi va uni boshqarish strategiyasi", "G'aznachilik tizimi va davlat xaridlari"]},
-
-    # 🏢 3. Biznes, Boshqaruv va Marketing
-    "menejment": {"title": "Menejment va boshqaruv asoslari", "topics": ["Menejment funksiyalari (Rejalashtirish, Tashkil etish, Nazorat)", "Strategik menejment va korxona strategiyasi", "Liderlik uslublari va xodimlarni motivatsiyalash", "Kadrlar (HR) menejmenti va inson resurslari"]},
-    "marketing": {"title": "Marketing va bozor tadqiqotlari", "topics": ["Marketing majmuasi (4P: Mahsulot, Narx, Taqsimot, Rag'bat)", "Bozorni segmentatsiyalash va targetlash", "Brending va iste'molchi xulq-atvori tahlili", "Raqamli (Digital) marketing va SMM vositalari"]},
-    "tadbirkorlik": {"title": "Kichik biznes va tadbirkorlik", "topics": ["Biznes reja tuzish va investitsiya jalb qilish", "Startap loyihalarni boshlash va rivojlantirish", "Kichik biznesni davlat tomonidan qo'llab-quvvatlash", "Franchayzing va venchur moliyalashtirish"]},
-    "korporativ": {"title": "Korporativ boshqaruv", "topics": ["Aksiyadorlik jamiyatlarida korporativ nazorat", "Kuzatuv kengashi va ijro organi faoliyati", "Manfaatdor tomonlar (Stakeholders) nazariyasi", "Korporativ etika va ijtimoiy mas'uliyat"]},
-    "raqamli_iqtisod": {"title": "Raqamli iqtisodiyot va IT", "topics": ["Elektron tijorat (E-commerce) va raqamli platformalar", "Sun'iy intellektning iqtisodiyotdagi o'rni", "Fintech va blokcheyn texnologiyalari", "Katta ma'lumotlar (Big Data) va bulutli texnologiyalar"]},
-    "iqtisodiy_xavfsizlik": {"title": "Iqtisodiy xavfsizlik", "topics": ["Milliy iqtisodiy xavfsizlik indikatorlari", "Oziq-ovqat va energetika xavfsizligi", "Moliyaviy va bank xavfsizligi choralari", "Iqtisodiy xatarlarni baholash va boshqarish"]},
-
-    # 🌾 4. Tarmoqlar va Amaliy Iqtisodiyot
-    "mintaqaviy": {"title": "Mintaqaviy iqtisodiyot", "topics": ["Hududlarning ijtimoiy-iqtisodiy salohiyati", "Mintaqaviy sanoat klasterlari tizimi", "Erkin iqtisodiy zonalar va kichik sanoat zonalari", "Mintaqalararo investitsiya jozibadorligi"]},
-    "agrar": {"title": "Agrar iqtisodiyot (Qishloq xo'jaligi)", "topics": ["Agrar sohada fermer va dehqon xo'jaliklari", "Agrobiznes va qishloq xo'jaligi kooperatsiyasi", "Qishloq xo'jaligida suv va yer resurslaridan oqilona foydalanish", "Agrar mahsulotlarni qayta ishlash va eksport"]},
-    "sanoat": {"title": "Sanoat va muhandislik iqtisodiyoti", "topics": ["Sanoat korxonalarida ishlab chiqarishni tashkil etish", "Mahsulot tannarxini kamaytirish va sifatni oshirish", "Sanoatda mehnat unumdorligi va texnologik yangilanish", "Resurs tejamkor va energiya samarador texnologiyalar"]},
-    "logistika": {"title": "Transport va logistika iqtisodiyoti", "topics": ["Ta'minot zanjirini boshqarish (Supply Chain Management)", "Transport xarajatlarini optimallashtirish usullari", "Omborxona va bojxona logistikasi", "Xalqaro transport yo'laklari va multimodal tashuvlar"]},
-    "turizm": {"title": "Turizm va servis iqtisodiyoti", "topics": ["Turizm xizmatlari bozori va uning infratuzilmasi", "Mehmonxona va restoran xo'jaligi iqtisodiyoti", "Ekoturizm, agroturizm va ziyorat turizmi", "O'zbekistonning turizm salohiyati va brendi"]},
-    "xalqaro": {"title": "Xalqaro iqtisodiyot va jahon xo'jaligi", "topics": ["Xalqaro savdo nazariyalari va bojxona tariflari", "Jahon savdo tashkiloti (JST/WTO) va O'zbekiston integratsiyasi", "Transmilliy korporatsiyalar (TMK) global bozorda", "Xalqaro to'lov balansi va valyuta kurslari"]}
-}
-
-categories: Dict[str, Dict[str, Any]] = {
-    "nazariy": {
-        "title": "🏛 Nazariy va Umumiy Iqtisodiyot",
-        "subjects": {
-            "iqt_nazariya": "Iqtisodiyot nazariyasi",
-            "makro": "Makroiqtisodiyot",
-            "mikro": "Mikroiqtisodiyot",
-            "talimotlar": "Iqtisodiy ta'limotlar tarixi",
-            "ekonometrika": "Ekonometrika va modellashtirish",
-            "statistika": "Statistika va ma'lumotlar"
-        }
-    },
-    "moliya": {
-        "title": "💰 Moliya, Bank va Soliq",
-        "subjects": {
-            "moliya": "Moliya va moliyaviy tahlil",
-            "bank": "Bank ishi va kredit",
-            "buxgalteriya": "Buxgalteriya hisobi va audit",
-            "soliq": "Soliq va soliqqa tortish",
-            "qimmatli_qogoz": "Qimmatli qog'ozlar va birja",
-            "davlat_moliyasi": "Davlat moliyasi va byudjet"
-        }
-    },
-    "biznes": {
-        "title": "🏢 Biznes, Boshqaruv va Marketing",
-        "subjects": {
-            "menejment": "Menejment va boshqaruv",
-            "marketing": "Marketing va bozor tadqiqotlari",
-            "tadbirkorlik": "Kichik biznes va tadbirkorlik",
-            "korporativ": "Korporativ boshqaruv",
-            "raqamli_iqtisod": "Raqamli iqtisodiyot va IT",
-            "iqtisodiy_xavfsizlik": "Iqtisodiy xavfsizlik"
-        }
-    },
-    "tarmoq": {
-        "title": "🌾 Tarmoqlar va Amaliy Iqtisodiyot",
-        "subjects": {
-            "mintaqaviy": "Mintaqaviy iqtisodiyot",
-            "agrar": "Agrar iqtisodiyot (Qishloq xo'jaligi)",
-            "sanoat": "Sanoat va muhandislik iqtisodiyoti",
-            "logistika": "Transport va logistika iqtisodiyoti",
-            "turizm": "Turizm va servis iqtisodiyoti",
-            "xalqaro": "Xalqaro iqtisodiyot"
-        }
-    }
-}
-
-# ==============================================================================
 # 🖥️ FOYDALANUVCHI INTERFEYSI (UI MENYULAR)
 # ==============================================================================
 def get_main_reply_menu() -> ReplyKeyboardMarkup:
@@ -152,7 +76,8 @@ def get_main_reply_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="📚 Mustaqil ish yozish")],
         [KeyboardButton(text="🧮 Masala yechish"), KeyboardButton(text="📊 Iqtisodiy grafiklar")],
         [KeyboardButton(text="🎓 O'qituvchi savollari"), KeyboardButton(text="✍️ Matn tahrirlash")],
-        [KeyboardButton(text="👥 Referal (Do'stlar)"), KeyboardButton(text="🌐 Tilni tanlash")]
+        [KeyboardButton(text="📊 O'zbekiston statistikasi"), KeyboardButton(text="👥 Referal (Do'stlar)")],
+        [KeyboardButton(text="🌐 Tilni tanlash")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Kerakli bo'limni tanlang...")
 
@@ -163,7 +88,7 @@ def get_back_only_menu() -> ReplyKeyboardMarkup:
 def get_language_reply_menu() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="🇺🇿 O'zbekcha"), KeyboardButton(text="🇷🇺 Русский")],
-        [KeyboardButton(text="🇬🇧 English"), KeyboardButton(text="🇺🇿 Ўзбекча")]
+        [KeyboardButton(text="🇬🇧 English"), KeyboardButton(text="🇺🇿 Ўзбекcha")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Tilni tanlang / Выберите язык...")
 
@@ -181,16 +106,44 @@ def get_main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_subjects_menu(cat_id: str) -> InlineKeyboardMarkup:
-    kb = [[InlineKeyboardButton(text=f"📘 {subj_title}", callback_data=f"subj_{subj_id}")] for subj_id, subj_title in categories[cat_id]["subjects"].items()]
+    cat = categories.get(cat_id, {})
+    subjs = cat.get("subjects", {})
+    kb = [[InlineKeyboardButton(text=f"📘 {subj_title}", callback_data=f"subj_{subj_id}")] for subj_id, subj_title in subjs.items()]
     kb.append([InlineKeyboardButton(text="⬅️ Yo'nalishlarga qaytish", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-def get_subject_action_menu(subj_id: str, cat_id: str = "nazariy") -> InlineKeyboardMarkup:
-    kb = [
-        [InlineKeyboardButton(text="✍️ Mavzuni qo'lda yozish", callback_data=f"write_topic_{subj_id}")],
-        [InlineKeyboardButton(text="📸 Mavzuni rasmga olib tashlash", callback_data=f"photo_topic_{subj_id}")],
-        [InlineKeyboardButton(text="⬅️ Boshqa fan tanlash", callback_data=f"cat_{cat_id}")]
-    ]
+def get_subject_topics_menu(subj_id: str, cat_id: str = "nazariy", page: int = 0) -> InlineKeyboardMarkup:
+    """Fan tanlanganda 5 tadan tayyor mavzular, sahifalash va o'zi kiritish/rasm variantlari."""
+    topics = get_subject_topics(subj_id)
+    per_page = 5
+    total_pages = max(1, (len(topics) + per_page - 1) // per_page)
+    cur_page = max(0, min(page, total_pages - 1))
+    
+    start_idx = cur_page * per_page
+    end_idx = min(start_idx + per_page, len(topics))
+    
+    kb = []
+    for i in range(start_idx, end_idx):
+        t_name = topics[i]
+        btn_text = f"{i+1}. {t_name}"
+        if len(btn_text) > 42:
+            btn_text = btn_text[:40] + "..."
+        kb.append([InlineKeyboardButton(text=btn_text, callback_data=f"tpk_{subj_id}_{i}")])
+        
+    if total_pages > 1:
+        nav_row = []
+        if cur_page > 0:
+            nav_row.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"tpg_{subj_id}_{cat_id}_{cur_page - 1}"))
+        nav_row.append(InlineKeyboardButton(text=f"📄 {cur_page + 1}/{total_pages}", callback_data="noop"))
+        if cur_page < total_pages - 1:
+            nav_row.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"tpg_{subj_id}_{cat_id}_{cur_page + 1}"))
+        kb.append(nav_row)
+        
+    kb.append([
+        InlineKeyboardButton(text="✍️ O'z mavzuingizni yozish", callback_data=f"write_topic_{subj_id}"),
+        InlineKeyboardButton(text="📸 Rasmdan o'qish", callback_data=f"photo_topic_{subj_id}")
+    ])
+    kb.append([InlineKeyboardButton(text="⬅️ Fanlar ro'yxatiga qaytish", callback_data=f"cat_{cat_id}")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_chart_selection_menu() -> InlineKeyboardMarkup:
@@ -320,17 +273,13 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
         await message.answer("⚠️ Sun'iy Intelekt qismi (Brain) ulanmagan. Iltimos, ma'muriyatga xabar bering.")
         return
         
-    wait_msg = await message.answer(f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida qisqa va lo'nda mustaqil ish tayyorlanmoqda...", parse_mode="Markdown")
+    wait_msg = await message.answer(
+        f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida to'liq akademik mustaqil ish (rasmiy statistik ma'lumotlar va jadvallar bilan) tayyorlanmoqda...",
+        parse_mode="Markdown"
+    )
     
     lang = await db.get_user_language(user_id) if user_id else "uz"
-    prompt = (
-        f"Foydalanuvchiga '{subject}' fani bo'yicha '{topic}' mavzusida qisqa, tushunarli va lo'nda mustaqil ish yozib ber.\n\n"
-        f"Qat'iy talablar:\n"
-        f"1. Hajmi: Qisqa va lo'nda (800-1200 belgi), ortiqcha gaplarsiz, faqat eng muhim asosiy tushunchalar.\n"
-        f"2. Hech qanday salomlashish yoki ortiqcha kirish gaplarsiz to'g'ridan-to'g'ri mohiyatdan boshla.\n"
-        f"3. MUHIM: Hech qanday *, #, _, ** kabi maxsus belgilarsiz mutlaqo oddiy toza matn bo'lsin.\n"
-        f"4. Til: {'O‘zbek tili (Lotin)' if lang == 'uz' else 'Ўзбекча (Кирилл)' if lang == 'uz_cyr' else 'Русский язык' if lang == 'ru' else 'English'}."
-    )
+    prompt = build_academic_essay_prompt(subject_title=subject, topic=topic, lang=lang)
     
     try:
         text = await request_ai_content(prompt)
@@ -477,14 +426,21 @@ async def back_to_main_reply(message: types.Message, state: FSMContext) -> None:
     await message.answer("🏠 Asosiy menyudasiz. Quyidagi bo'limlardan birini tanlang:", reply_markup=get_main_reply_menu())
 
 # --- 📚 1. Mustaqil Ish Bo'limi ---
+@dp.message(Command("fanlar"))
+@dp.message(Command("mustaqil_ish"))
 @dp.message(F.text == "📚 Mustaqil ish yozish")
 async def btn_mustaqil_ish_handler(message: types.Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer("Bo'lim ochilmoqda...", reply_markup=get_back_only_menu())
-    text = "Ajoyib! O'zingizga kerakli Iqtisodiyot yo'nalishini tanlang:"
-    await message.answer(text, reply_markup=get_main_menu())
+    text = (
+        "📚 *Barcha Iqtisodiyot Fanlari va Mavzular Kutubxonasi*\n\n"
+        "O'zingizga kerakli Iqtisodiyot yo'nalishini tanlang. "
+        "Har bir yo'nalishda 6 tadan fan va yuzlab rasmiy OTM mustaqil ish mavzulari mavjud:"
+    )
+    await message.answer(text, reply_markup=get_main_menu(), parse_mode="Markdown")
 
 # --- 🧮 2. Masala va Savol-Javob Bo'limi (Davomiy Rejim) ---
+@dp.message(Command("masala"))
 @dp.message(F.text == "🧮 Masala yechish")
 async def btn_problem_solve_handler(message: types.Message, state: FSMContext) -> None:
     await state.set_state(BotStates.in_problem_mode)
@@ -566,6 +522,7 @@ async def chart_callback_handler(callback: types.CallbackQuery):
     )
 
 # --- 🎓 6. O'qituvchi Savollari (Davomiy Rejim) ---
+@dp.message(Command("savollar"))
 @dp.message(F.text == "🎓 O'qituvchi savollari")
 async def btn_teacher_handler(message: types.Message, state: FSMContext) -> None:
     await state.set_state(BotStates.in_teacher_mode)
@@ -593,6 +550,7 @@ async def teacher_continuous_handler(message: types.Message, state: FSMContext) 
     await message.answer(questions, reply_markup=get_back_only_menu())
 
 # --- ✍️ 7. Matn Tahrirlash (Davomiy Rejim) ---
+@dp.message(Command("tahrirlash"))
 @dp.message(F.text == "✍️ Matn tahrirlash")
 async def btn_proofread_handler(message: types.Message, state: FSMContext) -> None:
     await state.set_state(BotStates.in_proofread_mode)
@@ -826,21 +784,66 @@ async def subject_handler(callback: types.CallbackQuery, state: FSMContext) -> N
             cat_id = c_id
             break
             
-    subj_title = knowledge_base.get(subj_id, {}).get("title", "Iqtisodiyot")
+    subj_info = get_subject_info(subj_id)
+    subj_title = subj_info.get("title", "Iqtisodiyot") if subj_info else "Iqtisodiyot"
     await state.update_data(subject_title=subj_title, subject_id=subj_id, cat_id=cat_id)
     await state.set_state(BotStates.in_custom_essay_mode)
     
     text = (
         f"📘 Tanlangan fan: *{subj_title}*\n\n"
-        f"Mustaqil ish mavzusini qanday kiritmoqchisiz?\n\n"
-        f"1️⃣ ✍️ *Mavzuni qo'lda yozish* — mavzu nomini matn ko'rinishida yozasiz.\n"
-        f"2️⃣ 📸 *Mavzuni rasmga olib tashlash* — daftardagi yoki kitobdagi mavzu rasmini tashlaysiz (AI o'zi o'qib oladi)."
+        f"Quyidagi tayyor mavzulardan birini tanlang (ustiga bosing) yoki o'z mavzuingizni yozing/rasmini yuboring:"
     )
     try:
-        await callback.message.edit_text(text, reply_markup=get_subject_action_menu(subj_id, cat_id), parse_mode="Markdown")
+        await callback.message.edit_text(text, reply_markup=get_subject_topics_menu(subj_id, cat_id, page=0), parse_mode="Markdown")
         await callback.answer()
     except TelegramAPIError:
         pass
+
+@dp.callback_query(F.data.startswith("tpg_"))
+async def topic_page_handler(callback: types.CallbackQuery) -> None:
+    # tpg_{subj_id}_{cat_id}_{page}
+    parts = callback.data.split("_")
+    page = int(parts[-1])
+    cat_id = parts[-2]
+    subj_id = "_".join(parts[1:-2])
+    
+    subj_info = get_subject_info(subj_id)
+    subj_title = subj_info.get("title", "Iqtisodiyot") if subj_info else "Iqtisodiyot"
+    
+    text = (
+        f"📘 Tanlangan fan: *{subj_title}*\n\n"
+        f"Quyidagi tayyor mavzulardan birini tanlang (ustiga bosing) yoki o'z mavzuingizni yozing/rasmini yuboring:"
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=get_subject_topics_menu(subj_id, cat_id, page=page), parse_mode="Markdown")
+        await callback.answer()
+    except TelegramAPIError:
+        pass
+
+@dp.callback_query(F.data.startswith("tpk_"))
+async def topic_picked_handler(callback: types.CallbackQuery, state: FSMContext) -> None:
+    # tpk_{subj_id}_{idx}
+    parts = callback.data.split("_")
+    idx = int(parts[-1])
+    subj_id = "_".join(parts[1:-1])
+    
+    subj_info = get_subject_info(subj_id)
+    if not subj_info:
+        await callback.answer("⚠️ Fan topilmadi.")
+        return
+        
+    topics = subj_info.get("topics", [])
+    if 0 <= idx < len(topics):
+        topic = topics[idx]
+        subj_title = subj_info["title"]
+        await callback.answer(f"Tanlandi: {topic[:30]}...")
+        await generate_essay(callback.message, subj_title, topic)
+    else:
+        await callback.answer("⚠️ Mavzu topilmadi.")
+
+@dp.callback_query(F.data == "noop")
+async def noop_callback_handler(callback: types.CallbackQuery) -> None:
+    await callback.answer()
 
 @dp.callback_query(F.data.startswith("write_topic_"))
 async def write_topic_click_handler(callback: types.CallbackQuery, state: FSMContext) -> None:
@@ -930,23 +933,43 @@ async def custom_topic_voice_handler(message: types.Message, state: FSMContext, 
     await wait_msg.delete()
     await message.answer(result, reply_markup=get_back_only_menu())
 
-# --- 📦 Backup Buyruqlari ---
+# --- 📊 14. Statistika va Makroiqtisodiy Ko'rsatkichlar (/stats) ---
 @dp.message(Command("stats"))
+@dp.message(F.text == "📊 O'zbekiston statistikasi")
+@dp.message(F.text == "📊 Statistika")
 async def stats_command_handler(message: types.Message) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    lang = await db.get_user_language(uid) if uid else "uz"
     stats = await db.get_stats()
     b_state = await db.get_backup_state()
     ch_info = b_state.get("channel", "@soul_backups")
     db_type = "MongoDB Atlas (Bulut)" if db.is_connected else "Mahalliy Zaxira (JSON)"
-    text = (
-        f"📊 *Bot statistikasi:*\n\n"
-        f"👥 Foydalanuvchilar: *{stats.get('users', 0)}* ta\n"
+    
+    macro_text = get_macro_stats_text(lang=lang)
+    bot_stats_text = (
+        f"\n\n🤖 *Soulbekbot Faoliyat Ko'rsatkichlari:*\n"
+        f"👥 Ro'yxatdan o'tgan talabalar: *{stats.get('users', 0)}* ta\n"
         f"📝 Tayyorlangan mustaqil ishlar: *{stats.get('requests', 0)}* ta\n"
         f"🗄 Ma'lumotlar bazasi: *{db_type}*\n"
         f"📦 Backup kanali: `{ch_info}`\n"
-        f"⚡ LRU Kesh: `{len(essay_cache)} ta mavzu`\n"
-        f"🌐 Keep-Alive Server: *Faol (/health va /admin)*"
+        f"⚡ LRU Kesh: *{len(essay_cache)} ta mavzu*\n"
+        f"🌐 Bulutli Server: *24/7 Faol (/health & /admin)*"
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(macro_text + bot_stats_text, parse_mode="Markdown")
+
+@dp.message(Command("help"))
+async def cmd_help_handler(message: types.Message) -> None:
+    help_text = (
+        "ℹ️ *Soulbekbot — O'zbekiston Talabalari Uchun Qo'llanma:*\n\n"
+        "1. 📚 *Mustaqil ish yozish* (`/fanlar`) — 30 ta fandan birini tanlang, 300+ tayyor mavzulardan birini bosing yoki o'zingiz yozing/rasmini yuboring.\n"
+        "2. 🧮 *Masala yechish* (`/masala`) — masala shartini yoki daftardagi rasmini yuboring.\n"
+        "3. 📊 *Grafiklar* — talab va taklif, YaIM, Fillips egri chizig'i grafiklarini rasm qilib oling.\n"
+        "4. 🎓 *O'qituvchi savollari* (`/savollar`) — imtihonga tayyorgarlik ko'rish uchun mavzu yuboring.\n"
+        "5. ✍️ *Matn tahrirlash* (`/tahrirlash`) — o'z matningizni akademik tahrir qildiring.\n"
+        "6. 📊 *Statistika* (`/stats`) — O'zbekiston rasmiy makroiqtisodiy ko'rsatkichlari bilan tanishing.\n\n"
+        "💡 *Telegramda istalgan paytda '/' belgisini qo'ysangiz, barcha buyruqlar ro'yxati chiqadi!*"
+    )
+    await message.answer(help_text, reply_markup=get_main_reply_menu(), parse_mode="Markdown")
 
 @dp.message(Command("set_backup"))
 async def set_backup_handler(message: types.Message, bot: Bot) -> None:
@@ -1038,6 +1061,22 @@ async def main() -> None:
     
     # 4. Kunlik hisobot xizmati
     daily_task = asyncio.create_task(daily_report_scheduler(bot))
+    
+    # 5. Telegram Slash Commands - foydalanuvchi '/' belgisini bosishi bilan barcha buyruqlar chiqishi
+    commands = [
+        BotCommand(command="start", description="🚀 Botni ishga tushirish / Qayta boshlash"),
+        BotCommand(command="fanlar", description="📚 Barcha 30 ta fan va 300 ta mavzu"),
+        BotCommand(command="stats", description="📊 O'zbekiston statistikasi va hisobot"),
+        BotCommand(command="masala", description="🧮 Iqtisodiy masala va formulalar yechish"),
+        BotCommand(command="savollar", description="🎓 O'qituvchi savollari (Imtihon)"),
+        BotCommand(command="tahrirlash", description="✍️ Matnni akademik tahrirlash"),
+        BotCommand(command="help", description="ℹ️ Qo'llanma va yordam")
+    ]
+    try:
+        await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+        logger.info("✅ Telegram Bot Commands ('/') muvaffaqiyatli ro'yxatdan o'tkazildi!")
+    except Exception as cmd_err:
+        logger.warning(f"⚠️ Bot commands ro'yxatdan o'tkazishda ogohlantirish: {cmd_err}")
     
     try:
         logger.info("🤖 Polling boshlandi...")
