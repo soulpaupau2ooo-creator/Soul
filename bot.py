@@ -274,7 +274,7 @@ async def generate_essay(message: types.Message, subject: str, topic: str) -> No
         return
         
     wait_msg = await message.answer(
-        f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida to'liq akademik mustaqil ish (rasmiy statistik ma'lumotlar va jadvallar bilan) tayyorlanmoqda...",
+        f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida qisqa va lo'nda mustaqil ish tayyorlanmoqda...",
         parse_mode="Markdown"
     )
     

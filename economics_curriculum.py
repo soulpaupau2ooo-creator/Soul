@@ -662,9 +662,7 @@ def get_macro_stats_text(lang: str = "uz") -> str:
     )
 
 def build_academic_essay_prompt(subject_title: str, topic: str, lang: str = "uz") -> str:
-    """Rasmiy OTM akademik mustaqil ishi uchun statistikaga boyitilgan mukammal AI prompt."""
-    m = UZBEKISTAN_MACRO_INDICATORS
-    
+    """Qisqa, lo'nda va eng muhim rasmiy statistik ma'lumotlar bilan boyitilgan ixcham mustaqil ish prompti."""
     lang_name = "O'zbek tili (Lotin alifbosi)"
     if lang == "uz_cyr":
         lang_name = "Ўзбек тили (Кирилл алифбоси)"
@@ -674,29 +672,18 @@ def build_academic_essay_prompt(subject_title: str, topic: str, lang: str = "uz"
         lang_name = "English"
 
     prompt = (
-        f"Siz O'zbekistonning eng nufuzli iqtisodiyot universitetlari (TDIU, Jahon Iqtisodiyoti, Moliya instituti) ning "
-        f"yetakchi akademigi, iqtisodiyot fanlari doktori va professori sifatida ish tutasiz.\n\n"
-        f"TALABANING FAN VA MAVZUSI:\n"
-        f"Fan: {subject_title}\n"
-        f"Mavzu: {topic}\n\n"
-        f"Vazifangiz: Ushbu mavzu bo'yicha talaba taqdim etishi uchun eng yuqori baho ('A' / 100 ball) oladigan, "
-        f"chuqur ilmiy asoslangan, RASMIY STATISTIK MA'LUMOTLAR VA TAHLILLAR BILAN BOYITILGAN mustaqil ish yozib berish.\n\n"
-        f"MUSTAQIL ISHNING MAJBURIY STRUKTURASI:\n"
-        f"1. MAVZUNING DOLZARBLIGI VA REJASI (Kirish qismi: maqsad, vazifalar va mavzuning bugungi kundagi ahamiyati).\n"
-        f"2. NAZARIY-METODOLOGIK ASOSLAR (Iqtisodiy qonunlar, nazariyalar, olimlarning qarashlari va formulalar).\n"
-        f"3. O'ZBEKISTON AMALIYOTIDAGI HOLAT VA STATISTIK TAHLIL:\n"
-        f"   - O'zbekiston Respublikasi Prezidenti huzuridagi Statistika agentligi (stat.uz) va Markaziy bank (cbu.uz) ning rasmiy raqamlari.\n"
-        f"   - MAJBURIY STATISTIK JADVAL: Quyidagi ko'rinishda matnli jadval shakllantirilsin:\n"
-        f"     | Ko'rsatkichlar | 2022 yil | 2023 yil | 2024 yil | O'zgarish dinamikasi |\n"
-        f"     (Mavzuga doir kamida 3-4 qatorli real statistik raqamlar va foizlar bilan to'ldirilsin).\n"
-        f"4. SOHADAGI MAVJUD MUAMMOLAR VA TO'SIQLAR (Tizimli tahlil).\n"
-        f"5. XULOSA VA O'ZBEKISTON UCHUN AMALIY TAKLIFLAR ('O'zbekiston - 2030' strategiyasi va qonunchilikka asoslangan 3 ta aniq taklif).\n"
-        f"6. FOYDALANILGAN RASMIY ADABIYOTLAR RO'YXATI (Darsliklar, Prezident farmonlari va stat.uz hisobotlari).\n\n"
-        f"QAT'IY TALABLAR:\n"
-        f"- Hajmi: To'liq va mukammal (2500 - 3500 belgi atrofida).\n"
-        f"- To'g'ridan-to'g'ri mustaqil ish sarlavhasidan boshlansin, hech qanday 'Assalomu alaykum' yoki soxta kirish gaplar bo'lmasin.\n"
-        f"- Hech qanday yulduzcha (**), panjara (###) yoki qalin harf teglari ishlatilmasin. Faqat o'qilishi qulay, chiroyli va tartibli toza matn bo'lsin.\n"
-        f"- Jadval chiziqlari chiroyli matnli (| va -) shaklida bo'lsin.\n"
-        f"- Til: {lang_name}."
+        f"Foydalanuvchiga '{subject_title}' fani bo'yicha '{topic}' mavzusida JUDA QISQA, LO'NDA va ANIQ mustaqil ish yozib ber.\n\n"
+        f"Qat'iy talablar:\n"
+        f"1. HAJMI: QAT'IY QISQA VA LO'NDA (800 - 1100 belgi, jami 3-4 ta ixcham xatboshi). Hech qanday uzun cho'zilgan matn bo'lmasin!\n"
+        f"2. STRUKTURA (ORTIQCHA BO'LIMLARSIZ, BIR BUTUN RAVON MATN):\n"
+        f"   - 1-xatboshi: Mavzuning asosiy iqtisodiy mohiyati va dolzarbligi (3-4 ta lo'nda gap).\n"
+        f"   - 2-xatboshi: O'zbekiston amaliyotidagi holat va rasmiy statistik ko'rsatkichlar (Statistika agentligi yoki Markaziy bankning 2-3 ta eng muhim aniq raqamlari/foizlari bilan ixcham tahlil).\n"
+        f"   - 3-xatboshi: Xulosa va amaliy taklif (2 ta aniq amaliy tavsiya).\n"
+        f"3. QAT'IYAN TAQIQLANADI:\n"
+        f"   - Matnni '1. Kirish', '2. Nazariya', '3. Amaliyot', '4. Muammolar', 'Reja' yoki 'Adabiyotlar' kabi ko'p va cho'zilgan bo'limlarga bo'lish QAT'IYAN TAQIQLANADI!\n"
+        f"   - Katta cho'zilgan jadvallar chizish taqiqlanadi (faqat matn ichida eng kerakli 2-3 ta asosiy raqam keltirilsin).\n"
+        f"   - Ortiqcha salomlashish, kirish yoki suv gaplar yozilmasin. To'g'ridan-to'g'ri mohiyatdan boshla.\n"
+        f"   - Hech qanday yulduzcha (**), panjara (###) yoki qalin harf teglari ishlatilmasin. Faqat o'qilishi qulay toza matn bo'lsin.\n"
+        f"4. Til: {lang_name}."
     )
     return prompt
