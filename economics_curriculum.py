@@ -642,7 +642,7 @@ def get_macro_stats_text(lang: str = "uz") -> str:
             f"• Основные торговые партнеры: {m['top_trade_partners']}\n"
             f"• Рост отраслей: Промышленность {m['industry_growth']}, Сельское хоз-во {m['agriculture_growth']}, Услуги {m['services_growth']}\n\n"
             f"🎯 Стратегия 'Узбекистан - 2030': {m['strategy_2030']}\n\n"
-            "Источники: Агентство статистики при Президенте РУз (stat.uz), Центральный банк РУз (cbu.uz)."
+            "🏛 Официальные источники: stat.uz, cbu.uz."
         )
     return (
         "📊 O'zbekiston Respublikasi rasmiy makroiqtisodiy statistik ma'lumotnomasi:\n\n"
@@ -658,7 +658,7 @@ def get_macro_stats_text(lang: str = "uz") -> str:
         f"• Asosiy savdo hamkorlar: {m['top_trade_partners']}\n"
         f"• Tarmoqlar o'sishi: Sanoat {m['industry_growth']}, Qishloq xo'jaligi {m['agriculture_growth']}, Xizmatlar {m['services_growth']}\n\n"
         f"🎯 'O'zbekiston - 2030' strategiyasi maqsadi: {m['strategy_2030']}\n\n"
-        "Manbalar: O'zbekiston Respublikasi Prezidenti huzuridagi Statistika agentligi (stat.uz), O'zbekiston Respublikasi Markaziy banki (cbu.uz)."
+        "🏛 Rasmiy manbalar: stat.uz, cbu.uz."
     )
 
 def build_academic_essay_prompt(subject_title: str, topic: str, lang: str = "uz") -> str:

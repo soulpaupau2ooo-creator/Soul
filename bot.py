@@ -751,6 +751,26 @@ async def unban_cmd_handler(message: types.Message) -> None:
     await db.set_ban_status(target_id, False)
     await message.answer(f"✅ Foydalanuvchi `{target_id}` qora ro'yxatdan chiqarildi.", parse_mode="Markdown")
 
+@dp.message(Command("admin_stats"))
+async def admin_stats_cmd_handler(message: types.Message) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    if uid not in ADMIN_IDS:
+        return
+    stats = await db.get_stats()
+    b_state = await db.get_backup_state()
+    ch_info = b_state.get("channel", "@soul_backups")
+    db_type = "MongoDB Atlas (Bulut)" if db.is_connected else "Mahalliy Zaxira (JSON)"
+    bot_stats_text = (
+        f"🤖 *Soulbekbot Tizim Ko'rsatkichlari (Admin):*\n\n"
+        f"👥 Ro'yxatdan o'tgan talabalar: *{stats.get('users', 0)}* ta\n"
+        f"📝 Tayyorlangan mustaqil ishlar: *{stats.get('requests', 0)}* ta\n"
+        f"🗄 Ma'lumotlar bazasi: *{db_type}*\n"
+        f"📦 Backup kanali: `{ch_info}`\n"
+        f"⚡ LRU Kesh: *{len(essay_cache)} ta mavzu*\n"
+        f"🌐 Bulutli Server: *24/7 Faol (/health & /admin)*"
+    )
+    await message.answer(bot_stats_text, parse_mode="Markdown")
+
 # --- ⚙️ Asosiy Navigatsiya & Mavzular ---
 @dp.callback_query(F.data == "back_to_main")
 async def back_main_handler(callback: types.CallbackQuery, state: FSMContext) -> None:
@@ -940,22 +960,8 @@ async def custom_topic_voice_handler(message: types.Message, state: FSMContext, 
 async def stats_command_handler(message: types.Message) -> None:
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
-    stats = await db.get_stats()
-    b_state = await db.get_backup_state()
-    ch_info = b_state.get("channel", "@soul_backups")
-    db_type = "MongoDB Atlas (Bulut)" if db.is_connected else "Mahalliy Zaxira (JSON)"
-    
     macro_text = get_macro_stats_text(lang=lang)
-    bot_stats_text = (
-        f"\n\n🤖 *Soulbekbot Faoliyat Ko'rsatkichlari:*\n"
-        f"👥 Ro'yxatdan o'tgan talabalar: *{stats.get('users', 0)}* ta\n"
-        f"📝 Tayyorlangan mustaqil ishlar: *{stats.get('requests', 0)}* ta\n"
-        f"🗄 Ma'lumotlar bazasi: *{db_type}*\n"
-        f"📦 Backup kanali: `{ch_info}`\n"
-        f"⚡ LRU Kesh: *{len(essay_cache)} ta mavzu*\n"
-        f"🌐 Bulutli Server: *24/7 Faol (/health & /admin)*"
-    )
-    await message.answer(macro_text + bot_stats_text, parse_mode="Markdown")
+    await message.answer(macro_text)
 
 @dp.message(Command("help"))
 async def cmd_help_handler(message: types.Message) -> None:
