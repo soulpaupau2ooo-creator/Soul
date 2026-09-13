@@ -209,10 +209,11 @@ async def start_web_server():
 # 🤖 YUKORI DARAJADAGI AI VA KESH (RESILIENCE + LRU CACHE)
 # ==============================================================================
 CANDIDATE_MODELS: List[str] = [
-    'gemini-3.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-flash-latest',
+    'gemini-2.5-flash-lite',
     'gemini-flash-lite-latest',
-    'gemini-3.6-flash',
-    'gemini-flash-latest'
+    'gemini-3.5-flash'
 ]
 
 async def request_ai_content(prompt: str) -> str:
@@ -471,13 +472,28 @@ async def problem_continuous_text_handler(message: types.Message, state: FSMCont
 # --- 📸 3. Rasm orqali masala yechish (Gemini Vision OCR) ---
 @dp.message(F.photo)
 async def photo_message_handler(message: types.Message, bot: Bot, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    if current_state == BotStates.in_custom_essay_mode.state:
+        await custom_topic_photo_handler(message, state, bot)
+        return
+
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
     photo = message.photo[-1]
     wait_msg = await message.answer("📸 Rasm qabul qilindi! Masala o'qilib, qisqa va lo'nda yechim tayyorlanmoqda...")
-    solution = await process_photo_problem(bot, photo, lang=lang)
-    await wait_msg.delete()
-    await message.answer(solution, reply_markup=get_back_only_menu())
+    try:
+        solution = await process_photo_problem(bot, photo, lang=lang)
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
+        await message.answer(solution, reply_markup=get_back_only_menu())
+    except Exception as e:
+        logger.error(f"Photo problem error: {e}")
+        try:
+            await wait_msg.edit_text("⚠️ Rasmni tahlil qilishda xatolik yuz berdi. Iltimos, qayta yuboring.")
+        except Exception:
+            await message.answer("⚠️ Rasmni tahlil qilishda xatolik yuz berdi.")
 
 # --- 🎤 4. Ovozli xabar orqali mavzu qabul qilish ---
 @dp.message(F.voice)
@@ -924,22 +940,32 @@ async def custom_topic_photo_handler(message: types.Message, state: FSMContext, 
     uid = message.from_user.id if message.from_user else 0
     lang = await db.get_user_language(uid) if uid else "uz"
     
-    wait_msg = await message.answer("📸 Rasm tahlil qilinmoqda, mavzu aniqlanmoqda...")
+    wait_msg = await message.answer("📸 Rasm qabul qilindi! AI Vision mavzuni aniqlamoqda...")
     photo = message.photo[-1]
     detected_topic = await extract_topic_from_photo(bot, photo, subject_title=subj_title, lang=lang)
     
     if detected_topic and len(detected_topic) > 3:
-        await wait_msg.edit_text(
-            f"🎯 *Rasm ichidan aniqlangan mavzu:*\n`{detected_topic}`\n\n"
-            f"⏳ Ushbu mavzu bo'yicha *{subj_title}* fanidan mustaqil ish tayyorlanmoqda...",
-            parse_mode="Markdown"
-        )
-        await generate_essay(message, subj_title, detected_topic)
+        clean_topic = detected_topic.replace("`", "").strip()
+        try:
+            await wait_msg.edit_text(
+                f"🎯 Rasm ichidan aniqlangan mavzu:\n«{clean_topic}»\n\n"
+                f"⏳ Ushbu mavzu bo'yicha {subj_title} fanidan qisqa va lo'nda mustaqil ish tayyorlanmoqda..."
+            )
+        except Exception:
+            pass
+        await generate_essay(message, subj_title, clean_topic)
+        await state.clear()
     else:
-        await wait_msg.edit_text(
-            "⚠️ Rasm ichidagi mavzuni aniq o'qib bo'lmadi. "
-            "Iltimos, rasmni yaqinroq va tiniqroq qilib qayta yuboring yoki mavzuni matn ko'rinishida yozing."
-        )
+        try:
+            await wait_msg.edit_text(
+                "⚠️ Rasm ichidagi mavzuni aniq o'qib bo'lmadi. "
+                "Iltimos, rasmni yaqinroq va tiniqroq qilib qayta yuboring yoki mavzuni matn ko'rinishida yozing."
+            )
+        except Exception:
+            await message.answer(
+                "⚠️ Rasm ichidagi mavzuni aniq o'qib bo'lmadi. "
+                "Iltimos, rasmni yaqinroq va tiniqroq qilib qayta yuboring yoki mavzuni matn ko'rinishida yozing."
+            )
 
 @dp.message(BotStates.in_custom_essay_mode, F.voice)
 async def custom_topic_voice_handler(message: types.Message, state: FSMContext, bot: Bot) -> None:
