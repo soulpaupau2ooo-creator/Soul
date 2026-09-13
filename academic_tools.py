@@ -18,8 +18,15 @@ logger = logging.getLogger("AcademicTools")
 API_KEYS_STR = os.getenv("GEMINI_API_KEYS", "")
 API_KEYS = [k.strip() for k in API_KEYS_STR.split(",") if k.strip()]
 
+CANDIDATE_MODELS: List[str] = [
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.6-flash',
+    'gemini-flash-latest'
+]
+
 async def request_ai_fast(prompt: str) -> str:
-    """Request AI using rotation."""
+    """Request AI using rotation and fast multi-model cascade."""
     if not API_KEYS:
         return "⚠️ Sun'iy Intellekt kalitlari ulanmagan."
     
@@ -29,15 +36,24 @@ async def request_ai_fast(prompt: str) -> str:
     for attempt, key in enumerate(shuffled):
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel('gemini-flash-latest')
-            resp = await asyncio.to_thread(model.generate_content, prompt)
-            if resp and resp.text:
-                return resp.text
-        except Exception as e:
-            if "429" in str(e).lower() and attempt < len(shuffled) - 1:
-                await asyncio.sleep(2)
+        except Exception:
+            continue
+            
+        for model_name in CANDIDATE_MODELS:
+            try:
+                model = genai.GenerativeModel(model_name)
+                resp = await asyncio.wait_for(
+                    asyncio.to_thread(model.generate_content, prompt),
+                    timeout=20.0
+                )
+                if resp and resp.text:
+                    return resp.text
+            except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str or "quota" in err_str or "404" in err_str:
+                    continue
                 continue
-            logger.warning(f"Fast AI error: {e}")
+                
     return "⚠️ Kechirasiz, tarmoqda vaqtinchalik bandlik. Birozdan so'ng qayta urinib ko'ring."
 
 async def solve_economic_problem(problem_text: str, lang: str = "uz") -> str:
