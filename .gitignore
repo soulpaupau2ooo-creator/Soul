@@ -7,3 +7,4 @@ users_db.json
 scratch/
 tts_cache/
 
+github_sync.py
