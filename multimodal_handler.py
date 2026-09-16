@@ -188,17 +188,11 @@ async def process_voice_topic(bot: Bot, voice: types.Voice, lang: str = "uz") ->
         logger.error(f"Ovoz tahlilida xatolik: {e}")
         return f"⚠️ Ovozli xabarni qayta ishlashda xatolik: {e}"
 
-def generate_tts_audio(text: str, lang: str = "uz") -> Optional[bytes]:
-    """Convert essay text to MP3 audio using gTTS."""
+async def generate_tts_audio(text: str, lang: str = "uz", gender: str = "female") -> Optional[bytes]:
+    """Convert essay text to high-quality neural MP3 audio using the production TTS service."""
     try:
-        tts_lang = 'ru' if lang == 'ru' else 'en' if lang == 'en' else 'tr'
-        clean_text = text[:800].replace("*", "").replace("_", "").replace("#", "")
-        
-        tts = gTTS(text=clean_text, lang=tts_lang, slow=False)
-        buf = io.BytesIO()
-        tts.write_to_fp(buf)
-        buf.seek(0)
-        return buf.read()
+        from tts import tts_service
+        return await tts_service.synthesize_speech(text, lang=lang, gender=gender)
     except Exception as e:
         logger.error(f"TTS audio yaratishda xato: {e}")
         return None

@@ -166,7 +166,10 @@ def get_languages_menu() -> InlineKeyboardMarkup:
 
 def get_essay_action_menu(user_id: int) -> InlineKeyboardMarkup:
     kb = [
-        [InlineKeyboardButton(text="🎧 Ovozli tinglash (Audio)", callback_data=f"tts_play_{user_id}")],
+        [
+            InlineKeyboardButton(text="👩 Madina ovozida", callback_data=f"tts_play_{user_id}_female"),
+            InlineKeyboardButton(text="👨 Sardor ovozida", callback_data=f"tts_play_{user_id}_male"),
+        ],
         [InlineKeyboardButton(text="🎓 O'qituvchi savollari (Imtihon)", callback_data=f"exam_sim_{user_id}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -607,28 +610,58 @@ async def proofread_continuous_handler(message: types.Message, state: FSMContext
 # --- 🎧 8. TTS Audio Tinglash Callbacks ---
 @dp.callback_query(F.data.startswith("tts_play_"))
 async def tts_callback_handler(callback: types.CallbackQuery):
-    uid = int(callback.data.replace("tts_play_", ""))
+    raw_data = callback.data.replace("tts_play_", "")
+    parts = raw_data.split("_")
+    uid = int(parts[0])
+    gender = parts[1] if len(parts) > 1 else "female"
+
     essay_text = last_generated_essays.get(uid)
     if not essay_text:
         await callback.answer("⚠️ Audio tayyorlash uchun avval mustaqil ish yozing.", show_alert=True)
         return
         
-    await callback.answer("🎧 Audio tayyorlanmoqda (10 soniya)...")
-    wait_msg = await callback.message.answer("⏳ Mustaqil ish audio shaklga o'tkazilmoqda...")
+    voice_label = "Madina (Neyron ayol ovozi)" if gender == "female" else "Sardor (Neyron erkak ovozi)"
+    await callback.answer(f"🎧 {voice_label} tayyorlanmoqda...")
+
+    try:
+        await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action="record_voice")
+    except Exception:
+        pass
+
+    wait_msg = await callback.message.answer(
+        f"⏳ Mustaqil ish *{voice_label}* da sintez qilinmoqda...\n"
+        f"_(Raqamlar, yillar va atamalar o'zbek tili fonetikasiga moslanmoqda)_",
+        parse_mode="Markdown"
+    )
     
     lang = await db.get_user_language(uid)
-    audio_bytes = await asyncio.to_thread(generate_tts_audio, essay_text, lang)
+    audio_bytes = await generate_tts_audio(essay_text, lang=lang, gender=gender)
     await wait_msg.delete()
     
     if audio_bytes:
-        audio_file = BufferedInputFile(audio_bytes, filename="mustaqil_ish_audio.mp3")
+        alt_gender = "male" if gender == "female" else "female"
+        alt_label = "👨 Sardor ovozida tinglash" if gender == "female" else "👩 Madina ovozida tinglash"
+        alt_markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=alt_label, callback_data=f"tts_play_{uid}_{alt_gender}")
+        ]])
+
+        audio_file = BufferedInputFile(audio_bytes, filename=f"mustaqil_ish_{gender}.mp3")
+        caption = (
+            f"🎧 *Mustaqil ishning audio versiyasi*\n"
+            f"🎙 *Ovoz:* {voice_label}\n"
+            f"⚡ *Texnologiya:* Microsoft Azure Neural TTS (O'zbek tili)\n"
+            f"💡 *Maslahat:* Telegram pleyerida tezlikni 1.2x yoki 1.5x qilib tinglashingiz mumkin."
+        )
         await callback.message.answer_audio(
             audio=audio_file,
-            caption="🎧 *Mustaqil ishning audio versiyasi*",
+            caption=caption,
+            title=f"Mustaqil Ish ({voice_label.split()[0]})",
+            performer="Mustaqil Ish Bot (AI Voice)",
+            reply_markup=alt_markup,
             parse_mode="Markdown"
         )
     else:
-        await callback.message.answer("⚠️ Audioni tayyorlashda xatolik yuz berdi.")
+        await callback.message.answer("⚠️ Audioni tayyorlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring.")
 
 @dp.callback_query(F.data.startswith("exam_sim_"))
 async def exam_sim_callback_handler(callback: types.CallbackQuery):
