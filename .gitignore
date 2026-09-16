@@ -5,3 +5,5 @@ __pycache__/
 users_db.json
 .system_generated/
 scratch/
+tts_cache/
+
