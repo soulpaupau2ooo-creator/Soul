@@ -1,4 +1,4 @@
-# Session State: Soulbekbot (Mustaqil ish bot) v6.3 Production
+# Session State: Soulbekbot (Mustaqil ish bot) v6.4 Production
 
 **Sana:** 2026-09-16
 **Loyiha papkasi:** `C:\Users\Azizbek\.gemini\antigravity\scratch\soulbekbot`
@@ -11,28 +11,23 @@
 
 ---
 
-## 🎯 Yakuniy holat (v6.3 Mukammal O'zbek Tili AI TTS Yangilanishi):
-1. **Microsoft Azure Speech AI Neyron O'zbekcha Ovozlar (`edge-tts`)**:
-   - `uz-UZ-MadinaNeural` (Ayol ovozi — muloyim, tiniq, ravon).
-   - `uz-UZ-SardorNeural` (Erkak ovozi — jiddiy, rasmiy ma'ruzachi).
-   - Eski `gTTS` turkcha xato talaffuzi butunlay olib tashlandi.
-2. **7-Bosqichli O'zbek Matn Normalizatsiya Dvigateli (`tts/uzbek_normalizer.py`)**:
-   - 0 dan trilliongacha sonlar, tartib sonlar (-inchi/-nchi).
-   - Yillar ("2024-yilda"), sanalar ("12.05.2024"), vaqt ("14:30").
-   - Kasrlar va foizlar ("6,5%"), valyutalar ("1 500 000 so'm", "$100", "€50").
-   - Qisqartmalar va birliklar (km, kg, mlrd, mln, sh., ko'ch., °C).
-   - O'zbekcha akronimlar (YaIM, BMT, AQSh, OTM, IIV).
-   - Kirill-Lotin to'liq konvertatsiyasi.
-   - Tashqi chet el so'zlari fonetik lug'ati (`tts/foreign_words.json`).
-3. **80+ Unit Testlar To'plami (`tests/test_uzbek_normalizer.py`)**:
-   - Barcha lingvistik qoidalar va ekstremal chekka holatlar 100% testlangan (54 test metodi, 90+ assertlar).
-4. **Ishlab Chiqarish Darajasidagi TTS Xizmati (`tts/service.py`)**:
-   - Fallback Chain: Madina -> Sardor -> gTTS.
-   - Circuit Breaker va Retry mexanizmi.
-   - Gap chegaralarini buzmagan holda uzun mustaqil ishlarni to'liq chunklash (2000+ belgilar).
-   - Disk va Memory LRU kesh (`tts_cache/`).
-5. **Professional Telegram Interfeysi**:
-   - `👩 Madina ovozida` va `👨 Sardor ovozida` alohida tugmalar.
-   - Jonli `record_voice` chat action indikatori.
-   - Audio tagida ovozni almashtirish tugmasi (`Inline switcher`).
-6. **30 ta OTM Fani, 300 ta Mavzular Kutubxonasi, Slash Buyruqlar va Rasmiy Statistika to'liq faol.**
+## 🎯 Yakuniy holat (v6.4 OTM Davlat Standartidagi Word .docx Generatsiyasi):
+1. **Rasmiy OTM Davlat Standartidagi Word (.docx) Hujjati (`docgen/mustaqil_ish.py`)**:
+   - A4 qog'oz, chap 3.0 sm, o'ng 1.5 sm, yuqori 2.0 sm, pastki 2.0 sm.
+   - Times New Roman 14 pt, 1.5 qator oralig'i, 1.25 sm abzas chekinishi, ikki tomonlama tekislash (Justified).
+   - Rasmiy Titul varaq (Vazirlik, OTM, fakultet, kafedra, fan, mavzu, talaba va o'qituvchi bloki, shahar va yil).
+   - Word da avtomatik yangilanuvchi rasmiy Mundarija (TOC field code).
+   - Titulda yashirilgan pastki markaziy sahifa raqamlash (`PAGE` field).
+2. **Telegram Orqali Haqiqiy Hujjat Yuborish (`sendDocument`)**:
+   - `📄 Word (.docx) yuklab olish` tugmasi orqali toza binar `.docx` yuboriladi.
+   - Kompyuterda (Word, LibreOffice) va telefonda (Word, WPS Office) 1 bosish bilan ochiladi.
+3. **Akademik Profil va Xotira Boshqaruvi (`/malumotlarim`)**:
+   - Talaba o'z universiteti, fakulteti, guruhi, F.I.Sh va o'qituvchisini kiritib qo'yishi mumkin.
+   - Bot har bir mustaqil ishning titul varag'iga ushbu ma'lumotlarni avtomatik joylaydi.
+4. **Microsoft Azure Speech AI Neyron O'zbekcha Ovozlar (`edge-tts`)**:
+   - `uz-UZ-MadinaNeural` (Ayol ovozi) va `uz-UZ-SardorNeural` (Erkak ovozi).
+5. **7-Bosqichli O'zbek Matn Normalizatsiya Dvigateli (`tts/uzbek_normalizer.py`)**:
+   - Raqamlar, yillar, kasrlar, valyuta, akronimlar, kirill-lotin.
+6. **Keng Qamrovli Unit Testlar To'plami (64 ta test metodi)**:
+   - Ham normalizatsiya, ham Word .docx o'lchamlari va strukturalari 100% yashil (OK).
+7. **30 ta OTM Fani, 300 ta Mavzular Kutubxonasi, Slash Buyruqlar va Rasmiy Statistika to'liq faol.**

@@ -4,7 +4,8 @@ import os
 import sys
 import random
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
+
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
@@ -28,6 +29,8 @@ from academic_tools import (
     summarize_article, proofread_text, generate_economic_chart
 )
 from multimodal_handler import process_photo_problem, process_voice_topic, generate_tts_audio, extract_topic_from_photo
+from docgen import MustaqilIshDocxBuilder, TitlePageInfo
+from docgen.content_parser import AcademicEssayParser
 from admin_suite import (
     web_admin_dashboard_handler, broadcast_message, send_daily_report,
     daily_report_scheduler, is_rate_limited, essay_cache, ADMIN_IDS
@@ -64,9 +67,16 @@ class BotStates(StatesGroup):
     in_teacher_mode = State()      # Persistent teacher Q&A
     in_proofread_mode = State()    # Persistent proofreading
     in_feedback_mode = State()     # Feedback
+    waiting_profile_university = State()
+    waiting_profile_faculty = State()
+    waiting_profile_name = State()
+    waiting_profile_group = State()
+    waiting_profile_teacher = State()
 
-# In-memory storage for TTS audio generation of essays
+# In-memory storage for TTS audio and Word docx generation of essays
 last_generated_essays: Dict[int, str] = {}
+last_generated_topics: Dict[int, str] = {}
+last_generated_subjects: Dict[int, str] = {}
 
 # ==============================================================================
 # 🖥️ FOYDALANUVCHI INTERFEYSI (UI MENYULAR)
@@ -167,10 +177,16 @@ def get_languages_menu() -> InlineKeyboardMarkup:
 def get_essay_action_menu(user_id: int) -> InlineKeyboardMarkup:
     kb = [
         [
-            InlineKeyboardButton(text="👩 Madina ovozida", callback_data=f"tts_play_{user_id}_female"),
-            InlineKeyboardButton(text="👨 Sardor ovozida", callback_data=f"tts_play_{user_id}_male"),
+            InlineKeyboardButton(text="📄 Word (.docx) yuklab olish", callback_data=f"docx_download_{user_id}"),
         ],
-        [InlineKeyboardButton(text="🎓 O'qituvchi savollari (Imtihon)", callback_data=f"exam_sim_{user_id}")]
+        [
+            InlineKeyboardButton(text="👩 Madina (Audio)", callback_data=f"tts_play_{user_id}_female"),
+            InlineKeyboardButton(text="👨 Sardor (Audio)", callback_data=f"tts_play_{user_id}_male"),
+        ],
+        [
+            InlineKeyboardButton(text="🎓 O'qituvchi savollari (Imtihon)", callback_data=f"exam_sim_{user_id}"),
+            InlineKeyboardButton(text="⚙️ Ma'lumotlarim", callback_data="my_academic_profile")
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -290,6 +306,8 @@ async def generate_essay(message: types.Message, subject: str, topic: str, wait_
         
         if user_id:
             last_generated_essays[user_id] = text
+            last_generated_topics[user_id] = topic
+            last_generated_subjects[user_id] = subject
         
         if message.from_user:
             await db.log_request(
@@ -300,8 +318,11 @@ async def generate_essay(message: types.Message, subject: str, topic: str, wait_
         
         if len(text) > 4000:
             parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
-            for part in parts:
-                await message.answer(part)
+            for p_idx, part in enumerate(parts):
+                if p_idx == len(parts) - 1:
+                    await message.answer(part, reply_markup=get_essay_action_menu(user_id))
+                else:
+                    await message.answer(part)
         else:
             await message.answer(text, reply_markup=get_essay_action_menu(user_id))
             
@@ -326,6 +347,8 @@ async def generate_essay(message: types.Message, subject: str, topic: str, wait_
             retry_text = await request_ai_content(prompt)
             if user_id:
                 last_generated_essays[user_id] = retry_text
+                last_generated_topics[user_id] = topic
+                last_generated_subjects[user_id] = subject
             if wait_msg:
                 try:
                     await wait_msg.delete()
@@ -662,6 +685,152 @@ async def tts_callback_handler(callback: types.CallbackQuery):
         )
     else:
         await callback.message.answer("⚠️ Audioni tayyorlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring.")
+
+# --- 📄 8.1 Word (.docx) Hujjat Generatsiyasi va Yuborish ---
+@dp.callback_query(F.data.startswith("docx_download_"))
+async def docx_download_callback_handler(callback: types.CallbackQuery):
+    uid = int(callback.data.replace("docx_download_", ""))
+    essay_text = last_generated_essays.get(uid)
+    if not essay_text:
+        await callback.answer("⚠️ Hujjat tayyorlash uchun avval mustaqil ish yozing.", show_alert=True)
+        return
+
+    await callback.answer("📄 Word (.docx) hujjati tayyorlanmoqda...")
+    wait_msg = await callback.message.answer(
+        "⏳ *Universitet davlat standarti bo'yicha Word (.docx) fayl tayyorlanmoqda...*\n"
+        "_(Titul varaq, avtomatik mundarija, 14 pt Times New Roman, 1.5 qator oralig'i)_",
+        parse_mode="Markdown"
+    )
+
+    try:
+        profile = await db.get_student_profile(uid)
+        topic = last_generated_topics.get(uid, "Mustaqil ish")
+        subject = last_generated_subjects.get(uid, "Iqtisodiyot")
+
+        title_info = TitlePageInfo(
+            university=profile.get("university", "Toshkent davlat iqtisodiyot universiteti"),
+            faculty=profile.get("faculty", "Iqtisodiyot fakulteti"),
+            department=profile.get("department", "Iqtisodiyot nazariyasi kafedrasi"),
+            subject=subject,
+            topic=topic,
+            student_name=profile.get("student_name", callback.from_user.full_name or "Talaba"),
+            group_name=profile.get("group_name", "IQ-101"),
+            teacher_name=profile.get("teacher_name", "dots. Karimov A."),
+            city=profile.get("city", "Toshkent"),
+            year=profile.get("year", str(datetime.now().year))
+        )
+
+        doc_data = AcademicEssayParser.parse_essay_to_document(essay_text, title_info)
+        builder = MustaqilIshDocxBuilder()
+        docx_bytes = builder.generate_docx(doc_data)
+        await wait_msg.delete()
+
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', topic[:25]).strip('_') or "mustaqil_ish"
+        filename = f"{safe_name}_OTM_standart.docx"
+
+        doc_file = BufferedInputFile(docx_bytes, filename=filename)
+        caption = (
+            f"📄 *Mustaqil ish Word (.docx) hujjati tayyor!*\n\n"
+            f"📌 *Mavzu:* {topic}\n"
+            f"🏛 *Universitet:* {title_info.university}\n"
+            f"👤 *Talaba:* {title_info.student_name} ({title_info.group_name})\n"
+            f"📐 *Standart:* A4, Chap 3.0 sm, 14 pt Times New Roman, 1.5 interval, Avtomatik Mundarija (TOC).\n\n"
+            f"💡 *Word, LibreOffice yoki telefoningizdagi Word/WPS ilovalarida bemalol ochiladi va chop etishga tayyor.*"
+        )
+
+        await callback.message.answer_document(
+            document=doc_file,
+            caption=caption,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Docx generation error: {e}")
+        if wait_msg:
+            try:
+                await wait_msg.edit_text(f"⚠️ Hujjatni shakllantirishda xatolik yuz berdi: {e}")
+            except Exception:
+                pass
+
+# --- ⚙️ 8.2 Akademik Profil Boshqaruvi (/malumotlarim) ---
+@dp.message(Command("malumotlarim"))
+@dp.callback_query(F.data == "my_academic_profile")
+async def my_academic_profile_handler(event: Union[types.Message, types.CallbackQuery]):
+    uid = event.from_user.id
+    profile = await db.get_student_profile(uid)
+    text = (
+        f"🎓 *Sizning Akademik Profilingiz (Titul varaq ma'lumotlari):*\n\n"
+        f"🏛 *Universitet:* {profile.get('university')}\n"
+        f"🏢 *Fakultet:* {profile.get('faculty')}\n"
+        f"📚 *Kafedra:* {profile.get('department')}\n"
+        f"👤 *Talaba:* {profile.get('student_name')}\n"
+        f"👥 *Guruh:* {profile.get('group_name')}\n"
+        f"👨‍🏫 *O'qituvchi:* {profile.get('teacher_name')}\n"
+        f"📍 *Shahar va yil:* {profile.get('city')}, {profile.get('year')}\n\n"
+        f"💡 Ushbu ma'lumotlar mustaqil ishingizning *Titul varag'iga* avtomatik joylanadi."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🏛 Universitetni o'zgartirish", callback_data="edit_prof_uni"),
+            InlineKeyboardButton(text="👤 Ismni o'zgartirish", callback_data="edit_prof_name"),
+        ],
+        [
+            InlineKeyboardButton(text="👥 Guruhni o'zgartirish", callback_data="edit_prof_group"),
+            InlineKeyboardButton(text="👨‍🏫 O'qituvchini kiritish", callback_data="edit_prof_teacher"),
+        ]
+    ])
+    if isinstance(event, types.CallbackQuery):
+        await event.answer()
+        await event.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    else:
+        await event.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "edit_prof_uni")
+async def edit_prof_uni_callback(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.set_state(BotStates.waiting_profile_university)
+    await callback.message.answer("🏛 Iltimos, o'qiydigan universitetingiz nomini to'liq yozib yuboring:\n(Masalan: Toshkent davlat iqtisodiyot universiteti)")
+
+@dp.message(BotStates.waiting_profile_university)
+async def process_prof_uni(message: types.Message, state: FSMContext):
+    await db.update_student_profile(message.from_user.id, {"university": message.text.strip()})
+    await state.clear()
+    await message.answer("✅ Universitet nomi saqlandi!", reply_markup=get_main_reply_menu())
+
+@dp.callback_query(F.data == "edit_prof_name")
+async def edit_prof_name_callback(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.set_state(BotStates.waiting_profile_name)
+    await callback.message.answer("👤 Familiyangiz, Ismingiz va Otangizning ismini yozib yuboring:")
+
+@dp.message(BotStates.waiting_profile_name)
+async def process_prof_name(message: types.Message, state: FSMContext):
+    await db.update_student_profile(message.from_user.id, {"student_name": message.text.strip()})
+    await state.clear()
+    await message.answer("✅ Talaba F.I.Sh saqlandi!", reply_markup=get_main_reply_menu())
+
+@dp.callback_query(F.data == "edit_prof_group")
+async def edit_prof_group_callback(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.set_state(BotStates.waiting_profile_group)
+    await callback.message.answer("👥 Guruhingiz nomini yozib yuboring (Masalan: MM-202 yoki DI-101):")
+
+@dp.message(BotStates.waiting_profile_group)
+async def process_prof_group(message: types.Message, state: FSMContext):
+    await db.update_student_profile(message.from_user.id, {"group_name": message.text.strip()})
+    await state.clear()
+    await message.answer("✅ Guruh nomi saqlandi!", reply_markup=get_main_reply_menu())
+
+@dp.callback_query(F.data == "edit_prof_teacher")
+async def edit_prof_teacher_callback(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.set_state(BotStates.waiting_profile_teacher)
+    await callback.message.answer("👨‍🏫 Tekshiruvchi o'qituvchi (ilmiy rahbar) F.I.Sh va unvonini yozib yuboring:\n(Masalan: dots. Karimov A.B.)")
+
+@dp.message(BotStates.waiting_profile_teacher)
+async def process_prof_teacher(message: types.Message, state: FSMContext):
+    await db.update_student_profile(message.from_user.id, {"teacher_name": message.text.strip()})
+    await state.clear()
+    await message.answer("✅ O'qituvchi ma'lumoti saqlandi!", reply_markup=get_main_reply_menu())
 
 @dp.callback_query(F.data.startswith("exam_sim_"))
 async def exam_sim_callback_handler(callback: types.CallbackQuery):
@@ -1146,6 +1315,7 @@ async def main() -> None:
         BotCommand(command="stats", description="📊 O'zbekiston statistikasi va hisobot"),
         BotCommand(command="masala", description="🧮 Iqtisodiy masala va formulalar yechish"),
         BotCommand(command="savollar", description="🎓 O'qituvchi savollari (Imtihon)"),
+        BotCommand(command="malumotlarim", description="⚙️ Titul varaq ma'lumotlarini sozlash"),
         BotCommand(command="tahrirlash", description="✍️ Matnni akademik tahrirlash"),
         BotCommand(command="help", description="ℹ️ Qo'llanma va yordam")
     ]

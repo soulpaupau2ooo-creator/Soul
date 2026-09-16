@@ -256,4 +256,42 @@ class DatabaseManager:
             data["users"][uid]["is_banned"] = is_banned
             self._save_local(data)
 
+    async def get_student_profile(self, user_id: int) -> Dict[str, str]:
+        """Retrieve student academic profile for coursework documents."""
+        user = await self.get_user(user_id) or {}
+        profile = user.get("student_profile", {})
+        default_name = user.get("full_name", "Talaba")
+        return {
+            "university": profile.get("university", "Toshkent davlat iqtisodiyot universiteti"),
+            "faculty": profile.get("faculty", "Iqtisodiyot fakulteti"),
+            "department": profile.get("department", "Iqtisodiyot nazariyasi kafedrasi"),
+            "student_name": profile.get("student_name", default_name),
+            "group_name": profile.get("group_name", "IQ-101"),
+            "teacher_name": profile.get("teacher_name", "dots. Karimov A."),
+            "city": profile.get("city", "Toshkent"),
+            "year": profile.get("year", str(datetime.now().year))
+        }
+
+    async def update_student_profile(self, user_id: int, profile_data: Dict[str, str]):
+        """Save or update student academic profile."""
+        current = await self.get_student_profile(user_id)
+        current.update(profile_data)
+        if self.is_connected and self.users_col is not None:
+            try:
+                await self.users_col.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"student_profile": current}},
+                    upsert=True
+                )
+                return
+            except Exception as e:
+                logger.error(f"Error updating student profile in MongoDB: {e}")
+
+        data = self._load_local()
+        uid = str(user_id)
+        if uid not in data.get("users", {}):
+            data["users"][uid] = {}
+        data["users"][uid]["student_profile"] = current
+        self._save_local(data)
+
 db = DatabaseManager()
