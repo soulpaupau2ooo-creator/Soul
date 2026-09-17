@@ -35,7 +35,7 @@ async def request_ai_fast(prompt: str) -> str:
     
     for attempt, key in enumerate(shuffled):
         try:
-            genai.configure(api_key=key)
+            genai.configure(api_key=key, transport="rest")
         except Exception:
             continue
             

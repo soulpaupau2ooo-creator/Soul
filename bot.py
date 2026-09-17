@@ -279,13 +279,13 @@ async def start_web_server(bot: Optional[Bot] = None):
 # ==============================================================================
 CANDIDATE_MODELS: List[str] = [
     'gemini-flash-lite-latest',
-    'gemini-3.1-flash-lite',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite-preview'
+    'gemini-3.6-flash',
+    'gemini-flash-latest',
+    'gemini-3.8-flash'
 ]
 
 async def request_ai_content(prompt: str) -> str:
-    """Asynchronous AI request with robust round-robin API Key rotation, multi-model cascade, and LRU caching."""
+    """Asynchronous AI request with robust round-robin API Key rotation, REST transport, and LRU caching."""
     cache_key = prompt.strip()
     if cache_key in essay_cache:
         logger.info("⚡ Javob keshdan olindi (Cache Hit)!")
@@ -301,7 +301,7 @@ async def request_ai_content(prompt: str) -> str:
     
     for attempt, current_key in enumerate(shuffled_keys):
         try:
-            genai.configure(api_key=current_key)
+            genai.configure(api_key=current_key, transport="rest")
         except Exception as ce:
             logger.warning(f"Key {attempt+1} configure error: {ce}")
             continue
@@ -311,7 +311,7 @@ async def request_ai_content(prompt: str) -> str:
                 model = genai.GenerativeModel(model_name)
                 response = await asyncio.wait_for(
                     asyncio.to_thread(model.generate_content, prompt),
-                    timeout=25.0
+                    timeout=60.0
                 )
                 
                 if response and response.text:

@@ -34,7 +34,7 @@ async def _call_gemini_vision(prompt: str, pil_img: Image.Image) -> Optional[str
 
     for k_idx, current_key in enumerate(shuffled_keys):
         try:
-            genai.configure(api_key=current_key)
+            genai.configure(api_key=current_key, transport="rest")
         except Exception as ce:
             logger.warning(f"Key config error: {ce}")
             continue
@@ -167,7 +167,7 @@ async def process_voice_topic(bot: Bot, voice: types.Voice, lang: str = "uz") ->
         random.shuffle(shuffled)
         for key in shuffled:
             try:
-                genai.configure(api_key=key)
+                genai.configure(api_key=key, transport="rest")
                 for v_model in ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite']:
                     try:
                         model = genai.GenerativeModel(v_model)
