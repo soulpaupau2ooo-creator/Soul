@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import random
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 
@@ -114,9 +115,22 @@ def get_back_only_menu() -> ReplyKeyboardMarkup:
 def get_language_reply_menu() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="🇺🇿 O'zbekcha"), KeyboardButton(text="🇷🇺 Русский")],
-        [KeyboardButton(text="🇬🇧 English"), KeyboardButton(text="🇺🇿 Ўзбекcha")]
+        [KeyboardButton(text="🇬🇧 English"), KeyboardButton(text="🇺🇿 Ўзбекча")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Tilni tanlang / Выберите язык...")
+
+def get_language_inline_menu() -> InlineKeyboardMarkup:
+    kb = [
+        [
+            InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="setlang_uz"),
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="setlang_ru")
+        ],
+        [
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="setlang_en"),
+            InlineKeyboardButton(text="🇺🇿 Ўзбекча", callback_data="setlang_uz_cyr")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_start_language_inline() -> InlineKeyboardMarkup:
     kb = [
@@ -449,7 +463,7 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
     )
     await message.answer(welcome_text, reply_markup=get_language_reply_menu())
 
-@dp.message(F.text.in_(["🇺🇿 O'zbekcha", "🇷🇺 Русский", "🇬🇧 English", "🇺🇿 Ўзбекча"]))
+@dp.message(F.text.in_(["🇺🇿 O'zbekcha", "🇷🇺 Русский", "🇬🇧 English", "🇺🇿 Ўзбекча", "🇺🇿 Ўзбекcha"]))
 async def language_selection_handler(message: types.Message, state: FSMContext) -> None:
     await state.clear()
     uid = message.from_user.id if message.from_user else 0
@@ -727,8 +741,13 @@ async def tts_callback_handler(callback: types.CallbackQuery):
 async def docx_download_callback_handler(callback: types.CallbackQuery):
     uid = int(callback.data.replace("docx_download_", ""))
     essay_text = last_generated_essays.get(uid)
+    
+    # Fallback: Agar bot qayta ishga tushib xotira tozalangan bo'lsa, xabar matnidan olamiz
+    if not essay_text and callback.message and callback.message.text:
+        essay_text = callback.message.text
+
     if not essay_text:
-        await callback.answer("⚠️ Hujjat tayyorlash uchun avval mustaqil ish yozing.", show_alert=True)
+        await callback.answer("⚠️ Hujjat tayyorlash uchun avval mustaqil ish yozing yoki mavzuni qayta tanlang.", show_alert=True)
         return
 
     await callback.answer("📄 Word (.docx) hujjati tayyorlanmoqda...")
@@ -759,7 +778,6 @@ async def docx_download_callback_handler(callback: types.CallbackQuery):
         doc_data = AcademicEssayParser.parse_essay_to_document(essay_text, title_info)
         builder = MustaqilIshDocxBuilder()
         docx_bytes = builder.generate_docx(doc_data)
-        await wait_msg.delete()
 
         safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', topic[:25]).strip('_') or "mustaqil_ish"
         filename = f"{safe_name}_OTM_standart.docx"
@@ -779,8 +797,15 @@ async def docx_download_callback_handler(callback: types.CallbackQuery):
             caption=caption,
             parse_mode="Markdown"
         )
+
+        # Hujjat muvaffaqiyatli jo'natilgach kutish xabarini o'chiramiz
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
+
     except Exception as e:
-        logger.error(f"Docx generation error: {e}")
+        logger.error(f"Docx generation error: {e}", exc_info=True)
         if wait_msg:
             try:
                 await wait_msg.edit_text(f"⚠️ Hujjatni shakllantirishda xatolik yuz berdi: {e}")
@@ -903,7 +928,7 @@ async def btn_referral_handler(message: types.Message) -> None:
 # --- 🌐 10. Tilni Tanlash ---
 @dp.message(F.text == "🌐 Tilni tanlash")
 async def btn_language_handler(message: types.Message) -> None:
-    await message.answer("Iltimos, o'zingizga qulay tilni tanlang:", reply_markup=get_language_reply_menu())
+    await message.answer("🌐 Iltimos, o'zingizga qulay tilni tanlang:", reply_markup=get_language_inline_menu())
 
 @dp.callback_query(F.data.startswith("setlang_"))
 async def set_language_callback(callback: types.CallbackQuery):
@@ -911,7 +936,18 @@ async def set_language_callback(callback: types.CallbackQuery):
     uid = callback.from_user.id
     await db.set_user_language(uid, lang_code)
     await callback.answer("Til o'zgartirildi!")
-    await callback.message.edit_text("✅ Til sozlamalari yangilandi.")
+    
+    if lang_code == "uz":
+        text = "✅ Til sozlamalari yangilandi: *O'zbekcha*\n\nQuyidagi menyudan kerakli bo'limni tanlang:"
+    elif lang_code == "ru":
+        text = "✅ Настройки языка обновлены: *Русский*\n\nВыберите нужный раздел из меню ниже:"
+    elif lang_code == "en":
+        text = "✅ Language settings updated: *English*\n\nPlease select an option from the menu below:"
+    else:
+        text = "✅ Тил созламалари янгиланди: *Ўзбекча*\n\nҚуйидаги менюдан керакли бўлимни танланг:"
+        
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.message.answer("🏠 Asosiy menyu:", reply_markup=get_main_reply_menu())
 
 # --- 📩 11. Feedback (Fikr-mulohaza) ---
 @dp.message(Command("feedback"))
