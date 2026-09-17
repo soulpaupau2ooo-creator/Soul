@@ -20,6 +20,7 @@ class AcademicEssayParser:
         raw_text: str,
         title_info: TitlePageInfo,
         include_references: bool = False,
+        page_break_between_sections: bool = False,
     ) -> MustaqilIshDocument:
         """
         Transform raw text into structured MustaqilIshDocument.
@@ -62,7 +63,7 @@ class AcademicEssayParser:
                         title=current_title,
                         paragraphs=list(current_paragraphs),
                         is_heading1=is_heading1,
-                        page_break_before=(current_title != "KIRISH")
+                        page_break_before=(page_break_between_sections and current_title != "KIRISH")
                     ))
                     current_paragraphs = []
                 in_references = True
@@ -97,7 +98,7 @@ class AcademicEssayParser:
                             title=current_title,
                             paragraphs=list(current_paragraphs),
                             is_heading1=is_heading1,
-                            page_break_before=(current_title != "KIRISH")
+                            page_break_before=(page_break_between_sections and current_title != "KIRISH")
                         ))
                         current_paragraphs = []
 
@@ -123,7 +124,7 @@ class AcademicEssayParser:
                 title=current_title,
                 paragraphs=list(current_paragraphs),
                 is_heading1=is_heading1,
-                page_break_before=(current_title != "KIRISH")
+                page_break_before=(page_break_between_sections and current_title != "KIRISH")
             ))
 
         # Ensure at least KIRISH exists

@@ -23,8 +23,8 @@ from economics_curriculum import build_academic_essay_prompt
 class TestEssayVolumeAndNoRefs(unittest.TestCase):
     def test_prompt_demands_large_volume_and_forbids_references(self):
         prompt = build_academic_essay_prompt("Iqtisodiyot", "Asosiy vositalar hisobi va amortizatsiyasi")
-        self.assertIn("KAMIDA 2-3 TO'LIQ LIST", prompt)
-        self.assertIn("7 000 dan 9 500 gacha belgi", prompt)
+        self.assertIn("2 TO'LIQ LIST", prompt)
+        self.assertIn("3 600 dan 4 200 gacha belgi", prompt)
         self.assertIn("ADABIYOTLAR RO'YXATI", prompt)
         self.assertIn("QAT'IYAN TAQIQLANADI", prompt)
 
@@ -78,6 +78,43 @@ class TestEssayVolumeAndNoRefs(unittest.TestCase):
 
         full_doc_text = "\n".join(p.text for p in doc.paragraphs)
         self.assertNotIn("FOYDALANILGAN ADABIYOTLAR RO'YXATI", full_doc_text)
+
+    def test_section_page_breaks_flow_smoothly_for_two_pages(self):
+        sample_essay = (
+            "KIRISH\n"
+            "Mavzuning dolzarbligi va maqsadlari.\n\n"
+            "1-BOB. NAZARIY ASOSLAR\n"
+            "Iqtisodiy nazariyalar va xalqaro tajriba.\n\n"
+            "2-BOB. O'ZBEKISTON AMALIYOTI\n"
+            "Rasmiy statistika va islohotlar tahlili.\n\n"
+            "XULOSA VA TAKLIFLAR\n"
+            "Amaliy takliflar va xulosalar.\n"
+        )
+        title_info = TitlePageInfo(
+            university="TDIU",
+            faculty="Iqtisodiyot",
+            department="Moliya",
+            subject="Iqtisodiyot",
+            topic="Raqamli iqtisodiyot",
+            student_name="Azizbek",
+            group_name="IQ-101"
+        )
+        # Default should have page_break_before=False for smooth 2-page flow without blank gaps
+        doc_data_continuous = AcademicEssayParser.parse_essay_to_document(
+            sample_essay, title_info, page_break_between_sections=False
+        )
+        for sec in doc_data_continuous.sections:
+            self.assertFalse(sec.page_break_before)
+
+        # When explicitly requested, subsequent chapters break pages
+        doc_data_broken = AcademicEssayParser.parse_essay_to_document(
+            sample_essay, title_info, page_break_between_sections=True
+        )
+        for sec in doc_data_broken.sections:
+            if sec.title == "KIRISH":
+                self.assertFalse(sec.page_break_before)
+            else:
+                self.assertTrue(sec.page_break_before)
 
 
 if __name__ == "__main__":
