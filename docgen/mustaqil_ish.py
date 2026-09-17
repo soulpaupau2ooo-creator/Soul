@@ -45,19 +45,20 @@ DEFAULT_PAGE_CONFIG = {
     "first_line_indent": Cm(1.25),
     "city": "Toshkent",
     "year": str(datetime.now().year),
+    "include_university_header": False,
 }
 
 
 @dataclass
 class TitlePageInfo:
     """Complete metadata for the academic coursework paper title page."""
-    university: str
-    faculty: str
-    department: str
-    subject: str
-    topic: str
-    student_name: str
-    group_name: str
+    university: str = ""
+    faculty: Optional[str] = None
+    department: Optional[str] = None
+    subject: str = ""
+    topic: str = ""
+    student_name: str = ""
+    group_name: Optional[str] = None
     teacher_name: Optional[str] = None
     city: str = "Toshkent"
     year: str = str(datetime.now().year)
@@ -65,16 +66,12 @@ class TitlePageInfo:
     def validate(self) -> None:
         """Validate that all mandatory fields are present and non-empty."""
         missing = []
-        if not self.university or not self.university.strip():
-            missing.append("Universitet nomi")
         if not self.subject or not self.subject.strip():
             missing.append("Fan nomi")
         if not self.topic or not self.topic.strip():
             missing.append("Mavzu")
         if not self.student_name or not self.student_name.strip():
             missing.append("Talaba F.I.Sh.")
-        if not self.group_name or not self.group_name.strip():
-            missing.append("Guruh")
 
         if missing:
             raise ValueError(f"Titul varag'i uchun quyidagi ma'lumotlar to'ldirilmagan: {', '.join(missing)}")
@@ -164,30 +161,35 @@ class MustaqilIshDocxBuilder:
         p_elem.append(fldSimple)
 
     def build_title_page(self, doc: docx.Document, info: TitlePageInfo) -> None:
-        """Render the complete academic title page (Titul varaq)."""
+        """Render the clean academic coursework title page."""
         info.validate()
 
-        # 1. Ministry and University Header (Top centered)
-        p_uni = doc.add_paragraph()
-        p_uni.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p_uni.paragraph_format.space_before = Pt(0)
-        p_uni.paragraph_format.space_after = Pt(4)
-        run_uni = p_uni.add_run("O'ZBEKISTON RESPUBLIKASI OLIY TA'LIM, FAN VA INNOVATSIYALAR VAZIRLIGI\n\n" + info.university.upper())
-        run_uni.font.name = self.config["font_name"]
-        run_uni.font.size = Pt(12)
-        run_uni.font.bold = True
+        # 1. Ministry and University Header (Only if explicitly enabled via config)
+        if self.config.get("include_university_header", False) and info.university and info.university.strip():
+            p_uni = doc.add_paragraph()
+            p_uni.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p_uni.paragraph_format.space_before = Pt(0)
+            p_uni.paragraph_format.space_after = Pt(4)
+            run_uni = p_uni.add_run("O'ZBEKISTON RESPUBLIKASI OLIY TA'LIM, FAN VA INNOVATSIYALAR VAZIRLIGI\n\n" + info.university.upper())
+            run_uni.font.name = self.config["font_name"]
+            run_uni.font.size = Pt(12)
+            run_uni.font.bold = True
 
-        if info.faculty:
-            p_fac = doc.add_paragraph()
-            p_fac.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p_fac.paragraph_format.space_before = Pt(0)
-            p_fac.paragraph_format.space_after = Pt(2)
-            run_fac = p_fac.add_run(info.faculty + "\n" + (info.department or ""))
-            run_fac.font.name = self.config["font_name"]
-            run_fac.font.size = Pt(13)
+            if info.faculty:
+                p_fac = doc.add_paragraph()
+                p_fac.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p_fac.paragraph_format.space_before = Pt(0)
+                p_fac.paragraph_format.space_after = Pt(2)
+                fac_text = info.faculty
+                if info.department:
+                    fac_text += f"\n{info.department}"
+                run_fac = p_fac.add_run(fac_text)
+                run_fac.font.name = self.config["font_name"]
+                run_fac.font.size = Pt(13)
 
         # Vertical spacing
-        for _ in range(4):
+        spacing_top = 4 if (self.config.get("include_university_header", False) and info.university) else 6
+        for _ in range(spacing_top):
             p_space = doc.add_paragraph()
             p_space.paragraph_format.space_before = Pt(0)
             p_space.paragraph_format.space_after = Pt(0)
@@ -218,27 +220,29 @@ class MustaqilIshDocxBuilder:
         run_top.font.bold = True
 
         # Vertical spacing
-        for _ in range(4):
+        for _ in range(spacing_top):
             p_space = doc.add_paragraph()
             p_space.paragraph_format.space_before = Pt(0)
             p_space.paragraph_format.space_after = Pt(0)
 
         # 3. Student and Teacher Info (Right aligned block)
-        p_info = doc.add_paragraph()
-        p_info.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        p_info.paragraph_format.space_before = Pt(12)
-        p_info.paragraph_format.space_after = Pt(6)
+        if info.student_name and info.student_name.strip() and info.student_name.lower() != "talaba":
+            p_info = doc.add_paragraph()
+            p_info.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            p_info.paragraph_format.space_before = Pt(12)
+            p_info.paragraph_format.space_after = Pt(6)
 
-        info_text = (
-            f"Bajardi: {info.group_name}-guruh talabasi\n"
-            f"{info.student_name}\n\n"
-        )
-        if info.teacher_name:
-            info_text += f"Qabul qildi: {info.teacher_name}\n"
+            if info.group_name and info.group_name.strip() and info.group_name != "IQ-101":
+                info_text = f"Bajardi: {info.group_name}-guruh talabasi\n{info.student_name}\n\n"
+            else:
+                info_text = f"Bajardi: talaba\n{info.student_name}\n\n"
 
-        run_meta = p_info.add_run(info_text)
-        run_meta.font.name = self.config["font_name"]
-        run_meta.font.size = Pt(13)
+            if info.teacher_name and info.teacher_name.strip() and info.teacher_name != "dots. Karimov A.":
+                info_text += f"Qabul qildi: {info.teacher_name}\n"
+
+            run_meta = p_info.add_run(info_text)
+            run_meta.font.name = self.config["font_name"]
+            run_meta.font.size = Pt(13)
 
         # Vertical spacing to bottom
         for _ in range(4):

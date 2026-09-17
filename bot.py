@@ -214,8 +214,7 @@ def get_essay_action_menu(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="👨 Sardor (Audio)", callback_data=f"tts_play_{user_id}_male"),
         ],
         [
-            InlineKeyboardButton(text="🎓 O'qituvchi savollari (Imtihon)", callback_data=f"exam_sim_{user_id}"),
-            InlineKeyboardButton(text="⚙️ Ma'lumotlarim", callback_data="my_academic_profile")
+            InlineKeyboardButton(text="🎓 O'qituvchi savollari (Imtihon)", callback_data=f"exam_sim_{user_id}")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -812,16 +811,16 @@ async def docx_download_callback_handler(callback: types.CallbackQuery):
         subject = last_generated_subjects.get(uid) or cached_info.get("last_subject") or "Iqtisodiyot"
 
         title_info = TitlePageInfo(
-            university=profile.get("university", "Toshkent davlat iqtisodiyot universiteti"),
-            faculty=profile.get("faculty", "Iqtisodiyot fakulteti"),
-            department=profile.get("department", "Iqtisodiyot nazariyasi kafedrasi"),
+            university="",
+            faculty="",
+            department="",
             subject=subject,
             topic=topic,
-            student_name=profile.get("student_name", callback.from_user.full_name or "Talaba"),
-            group_name=profile.get("group_name", "IQ-101"),
-            teacher_name=profile.get("teacher_name", "dots. Karimov A."),
-            city=profile.get("city", "Toshkent"),
-            year=profile.get("year", str(datetime.now().year))
+            student_name=profile.get("student_name") or callback.from_user.full_name or "Talaba",
+            group_name="",
+            teacher_name="",
+            city="Toshkent",
+            year=str(datetime.now().year)
         )
 
         doc_data = AcademicEssayParser.parse_essay_to_document(essay_text, title_info, include_references=False)
@@ -834,9 +833,9 @@ async def docx_download_callback_handler(callback: types.CallbackQuery):
         doc_file = BufferedInputFile(docx_bytes, filename=filename)
         caption = (
             f"📄 *Mustaqil ish Word (.docx) hujjati tayyor!*\n\n"
-            f"📌 *Mavzu:* {topic}\n"
-            f"🏛 *Universitet:* {title_info.university}\n"
-            f"👤 *Talaba:* {title_info.student_name} ({title_info.group_name})\n"
+            f"📌 *Fan:* {subject}\n"
+            f"📝 *Mavzu:* {topic}\n"
+            f"👤 *Talaba:* {title_info.student_name}\n"
             f"📐 *Standart:* A4, Chap 3.0 sm, 14 pt Times New Roman, 1.5 interval, Avtomatik Mundarija (TOC).\n\n"
             f"💡 *Word, LibreOffice yoki telefoningizdagi Word/WPS ilovalarida bemalol ochiladi va chop etishga tayyor.*"
         )
@@ -1441,7 +1440,6 @@ async def main() -> None:
         BotCommand(command="stats", description="📊 O'zbekiston statistikasi va hisobot"),
         BotCommand(command="masala", description="🧮 Iqtisodiy masala va formulalar yechish"),
         BotCommand(command="savollar", description="🎓 O'qituvchi savollari (Imtihon)"),
-        BotCommand(command="malumotlarim", description="⚙️ Titul varaq ma'lumotlarini sozlash"),
         BotCommand(command="tahrirlash", description="✍️ Matnni akademik tahrirlash"),
         BotCommand(command="help", description="ℹ️ Qo'llanma va yordam")
     ]

@@ -262,12 +262,12 @@ class DatabaseManager:
         profile = user.get("student_profile", {})
         default_name = user.get("full_name", "Talaba")
         return {
-            "university": profile.get("university", "Toshkent davlat iqtisodiyot universiteti"),
-            "faculty": profile.get("faculty", "Iqtisodiyot fakulteti"),
-            "department": profile.get("department", "Iqtisodiyot nazariyasi kafedrasi"),
+            "university": profile.get("university", ""),
+            "faculty": profile.get("faculty", ""),
+            "department": profile.get("department", ""),
             "student_name": profile.get("student_name", default_name),
-            "group_name": profile.get("group_name", "IQ-101"),
-            "teacher_name": profile.get("teacher_name", "dots. Karimov A."),
+            "group_name": profile.get("group_name", ""),
+            "teacher_name": profile.get("teacher_name", ""),
             "city": profile.get("city", "Toshkent"),
             "year": profile.get("year", str(datetime.now().year))
         }

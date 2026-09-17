@@ -89,13 +89,13 @@ class TestMustaqilIshDocxBuilder(unittest.TestCase):
         return MustaqilIshDocument(title_info=title_info, sections=sections, references=refs)
 
     def test_missing_title_info_raises_error(self):
-        # Missing university
+        # Missing subject
         with self.assertRaises(ValueError):
             info = TitlePageInfo(
                 university="",
                 faculty="Iqtisodiyot",
                 department="Moliya",
-                subject="Makroiqtisodiyot",
+                subject="",
                 topic="Raqamli iqtisodiyot",
                 student_name="Azizbek",
                 group_name="DI-101"
@@ -277,6 +277,27 @@ class TestMustaqilIshDocxBuilder(unittest.TestCase):
         self.assertGreater(len(docx_bytes), 15000)
         doc = docx.Document(io.BytesIO(docx_bytes))
         self.assertGreater(len(doc.paragraphs), 30)
+
+
+    def test_default_title_page_omits_university_header(self):
+        info = TitlePageInfo(
+            university="Toshkent davlat iqtisodiyot universiteti",
+            faculty="Iqtisodiyot",
+            department="Kafedra",
+            subject="Mikroiqtisodiyot",
+            topic="Korxona xarajatlari",
+            student_name="Aziz Raxmatullayev",
+            group_name="IQ-101"
+        )
+        doc_data = self._create_sample_doc(info, sections_count=1)
+        docx_bytes = self.builder.generate_docx(doc_data)
+        doc = docx.Document(io.BytesIO(docx_bytes))
+        first_page_paras = [p.text for p in doc.paragraphs[:15] if p.text.strip()]
+        first_page_text = " ".join(first_page_paras)
+        self.assertNotIn("VAZIRLIGI", first_page_text)
+        self.assertNotIn("TOSHKENT DAVLAT", first_page_text)
+        self.assertIn("MUSTAQIL ISH", first_page_text)
+        self.assertIn("Mikroiqtisodiyot", first_page_text)
 
 
 if __name__ == "__main__":
