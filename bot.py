@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 
 
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, ADMINISTRATOR
@@ -16,6 +17,7 @@ from aiogram.types import (
     BufferedInputFile, InlineQueryResultArticle, InputTextMessageContent,
     BotCommand, BotCommandScopeDefault
 )
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramAPIError
@@ -60,6 +62,20 @@ if not BOT_TOKEN:
 dp = Dispatcher()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
 logger = logging.getLogger("Soulbekbot")
+
+# 🌐 Webhook & Hosting Konfiguratsiyasi (Render & Local Hybrid)
+WEBHOOK_BASE_URL: str = os.getenv("WEBHOOK_URL", os.getenv("RENDER_EXTERNAL_URL", "https://soul-0rvl.onrender.com"))
+WEBHOOK_PATH: str = "/webhook"
+IS_RENDER_ENV: bool = bool(os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_URL"))
+USE_WEBHOOK_CONFIG: str = os.getenv("USE_WEBHOOK", "").lower()
+
+if USE_WEBHOOK_CONFIG in ("true", "1", "yes"):
+    USE_WEBHOOK: bool = True
+elif USE_WEBHOOK_CONFIG in ("false", "0", "no"):
+    USE_WEBHOOK: bool = False
+else:
+    # Auto-detect: Enable webhook on Render cloud or Linux server, fallback to polling on local Windows
+    USE_WEBHOOK: bool = IS_RENDER_ENV or (sys.platform != "win32" and bool(os.getenv("PORT")))
 
 class BotStates(StatesGroup):
     in_problem_mode = State()      # Persistent problem solving & questions
@@ -207,21 +223,41 @@ async def health_check_handler(request: web.Request) -> web.Response:
 async def root_handler(request: web.Request) -> web.Response:
     return web.Response(
         text="🤖 Soulbekbot 24/7 Cloud Hosting da faol ishlamoqda!\nKeep-alive health endpoint: /health\nWeb Admin Dashboard: /admin",
-        content_type="text/plain; charset=utf-8"
+        content_type="text/plain",
+        charset="utf-8"
     )
 
-async def start_web_server():
+async def keep_alive_scheduler_loop(url: str) -> None:
+    """Render Free tier serveri uxlab qolmasligi uchun har 10 daqiqada /health ga ping yuborib turadi."""
+    await asyncio.sleep(45)
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                health_url = f"{url.rstrip('/')}/health"
+                async with session.get(health_url, timeout=15) as resp:
+                    logger.info(f"💓 Keep-alive ping muvaffaqiyatli ({health_url}), status: {resp.status}")
+            except Exception as ping_err:
+                logger.warning(f"⚠️ Keep-alive ping ogohlantirish: {ping_err}")
+            await asyncio.sleep(600)
+
+async def start_web_server(bot: Optional[Bot] = None):
     app = web.Application()
     app.router.add_get("/", root_handler)
     app.router.add_get("/health", health_check_handler)
     app.router.add_get("/admin", web_admin_dashboard_handler)
     
+    if USE_WEBHOOK and bot is not None:
+        webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+        webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+        setup_application(app, dp, bot=bot)
+        logger.info(f"🔗 Webhook yo'naltiruvchisi aiohttp ga ulandi: {WEBHOOK_PATH}")
+
     port = int(os.getenv("PORT", 10000))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info(f"🌐 Keep-Alive Web Server 0.0.0.0:{port} portida ishga tushdi (/health va /admin tayyor)")
+    logger.info(f"🌐 Server 0.0.0.0:{port} portida ishga tushdi (Webhook: {USE_WEBHOOK}, /health & /admin tayyor)")
     return runner
 
 # ==============================================================================
@@ -1290,7 +1326,7 @@ async def fallback_text_handler(message: types.Message) -> None:
     await message.answer(ans, reply_markup=get_main_reply_menu())
 
 # ==============================================================================
-# 🚀 SYSTEM ENTRY (POLLING + WEB SERVER + BACKUP SCHEDULER)
+# 🚀 SYSTEM ENTRY (WEBHOOK / POLLING + WEB SERVER + BACKUP SCHEDULER)
 # ==============================================================================
 async def main() -> None:
     bot = Bot(BOT_TOKEN)
@@ -1299,8 +1335,8 @@ async def main() -> None:
     # 1. MongoDB bazaga ulanish
     await db.connect()
     
-    # 2. Render & cron-job.org uchun /health va /admin veb-serverini ishga tushirish
-    web_runner = await start_web_server()
+    # 2. Render & cron-job.org uchun veb-server (hamda Webhook) ni ishga tushirish
+    web_runner = await start_web_server(bot=bot)
     
     # 3. Har 30 minutda GitHub Backup yuboruvchi fon xizmati
     backup_task = asyncio.create_task(backup_scheduler_loop(bot))
@@ -1308,7 +1344,12 @@ async def main() -> None:
     # 4. Kunlik hisobot xizmati
     daily_task = asyncio.create_task(daily_report_scheduler(bot))
     
-    # 5. Telegram Slash Commands - foydalanuvchi '/' belgisini bosishi bilan barcha buyruqlar chiqishi
+    # 5. Render Free tier uxlab qolmasligi uchun Keep-Alive avto-ping
+    keep_alive_task: Optional[asyncio.Task] = None
+    if USE_WEBHOOK:
+        keep_alive_task = asyncio.create_task(keep_alive_scheduler_loop(WEBHOOK_BASE_URL))
+    
+    # 6. Telegram Slash Commands - foydalanuvchi '/' belgisini bosishi bilan barcha buyruqlar chiqishi
     commands = [
         BotCommand(command="start", description="🚀 Botni ishga tushirish / Qayta boshlash"),
         BotCommand(command="fanlar", description="📚 Barcha 30 ta fan va 300 ta mavzu"),
@@ -1326,11 +1367,27 @@ async def main() -> None:
         logger.warning(f"⚠️ Bot commands ro'yxatdan o'tkazishda ogohlantirish: {cmd_err}")
     
     try:
-        logger.info("🤖 Polling boshlandi...")
-        await dp.start_polling(bot)
+        if USE_WEBHOOK:
+            full_webhook_url = f"{WEBHOOK_BASE_URL.rstrip('/')}{WEBHOOK_PATH}"
+            logger.info(f"📡 Telegram Webhook o'rnatilmoqda: {full_webhook_url}")
+            await bot.set_webhook(
+                url=full_webhook_url,
+                drop_pending_updates=False,
+                allowed_updates=dp.resolve_used_update_types()
+            )
+            logger.info("🚀 Webhook muvaffaqiyatli faollashtirildi! 24/7 kutish rejimiga o'tildi.")
+            stop_event = asyncio.Event()
+            await stop_event.wait()
+        else:
+            logger.info("ℹ️ Polling rejimi tanlandi. Avvalgi webhooklar tozalanmoqda...")
+            await bot.delete_webhook(drop_pending_updates=False)
+            logger.info("🤖 Polling boshlandi...")
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except Exception as e:
         logger.critical(f"FATAL ERROR: {e}")
     finally:
+        if keep_alive_task:
+            keep_alive_task.cancel()
         backup_task.cancel()
         daily_task.cancel()
         await web_runner.cleanup()

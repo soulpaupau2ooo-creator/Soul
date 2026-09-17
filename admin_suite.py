@@ -160,4 +160,4 @@ async def web_admin_dashboard_handler(request: web.Request) -> web.Response:
     </div>
 </body>
 </html>"""
-    return web.Response(text=html, content_type="text/html; charset=utf-8")
+    return web.Response(text=html, content_type="text/html", charset="utf-8")

@@ -8,3 +8,5 @@ scratch/
 tts_cache/
 
 github_sync.py
+claude_prompt.txt
+claude_response.txt
