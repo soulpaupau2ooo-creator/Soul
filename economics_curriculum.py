@@ -662,7 +662,11 @@ def get_macro_stats_text(lang: str = "uz") -> str:
     )
 
 def build_academic_essay_prompt(subject_title: str, topic: str, lang: str = "uz") -> str:
-    """Qisqa, lo'nda va eng muhim rasmiy statistik ma'lumotlar bilan boyitilgan ixcham mustaqil ish prompti."""
+    """
+    O'zbekiston Respublikasi OTM davlat ta'lim standarti bo'yicha to'liq hajmli,
+    kamida 2-3 to'liq Word sahifasini (kamida 7 000 - 9 500 belgi) qamrab oluvchi
+    chuqur tahliliy va professional akademik mustaqil ish yaratish prompti.
+    """
     lang_name = "O'zbek tili (Lotin alifbosi)"
     if lang == "uz_cyr":
         lang_name = "Ўзбек тили (Кирилл алифбоси)"
@@ -672,18 +676,37 @@ def build_academic_essay_prompt(subject_title: str, topic: str, lang: str = "uz"
         lang_name = "English"
 
     prompt = (
-        f"Foydalanuvchiga '{subject_title}' fani bo'yicha '{topic}' mavzusida JUDA QISQA, LO'NDA va ANIQ mustaqil ish yozib ber.\n\n"
-        f"Qat'iy talablar:\n"
-        f"1. HAJMI: QAT'IY QISQA VA LO'NDA (800 - 1100 belgi, jami 3-4 ta ixcham xatboshi). Hech qanday uzun cho'zilgan matn bo'lmasin!\n"
-        f"2. STRUKTURA (ORTIQCHA BO'LIMLARSIZ, BIR BUTUN RAVON MATN):\n"
-        f"   - 1-xatboshi: Mavzuning asosiy iqtisodiy mohiyati va dolzarbligi (3-4 ta lo'nda gap).\n"
-        f"   - 2-xatboshi: O'zbekiston amaliyotidagi holat va rasmiy statistik ko'rsatkichlar (Statistika agentligi yoki Markaziy bankning 2-3 ta eng muhim aniq raqamlari/foizlari bilan ixcham tahlil).\n"
-        f"   - 3-xatboshi: Xulosa va amaliy taklif (2 ta aniq amaliy tavsiya).\n"
-        f"3. QAT'IYAN TAQIQLANADI:\n"
-        f"   - Matnni '1. Kirish', '2. Nazariya', '3. Amaliyot', '4. Muammolar', 'Reja' yoki 'Adabiyotlar' kabi ko'p va cho'zilgan bo'limlarga bo'lish QAT'IYAN TAQIQLANADI!\n"
-        f"   - Katta cho'zilgan jadvallar chizish taqiqlanadi (faqat matn ichida eng kerakli 2-3 ta asosiy raqam keltirilsin).\n"
-        f"   - Ortiqcha salomlashish, kirish yoki suv gaplar yozilmasin. To'g'ridan-to'g'ri mohiyatdan boshla.\n"
-        f"   - Hech qanday yulduzcha (**), panjara (###) yoki qalin harf teglari ishlatilmasin. Faqat o'qilishi qulay toza matn bo'lsin.\n"
-        f"4. Til: {lang_name}."
+        f"Sen O'zbekistonning eng nufuzli iqtisodiyot universiteti (Toshkent Davlat Iqtisodiyot Universiteti, JIDU) "
+        f"bosh ilmiy rahbari, professori va talabalar uchun oliy toifali mustaqil ishlar bo'yicha bosh maslahatchisisan.\n\n"
+        f"VAZIFA: '{subject_title}' fani bo'yicha «{topic}» mavzusida Oliy ta'lim standarti talablariga to'liq javob beruvchi, "
+        f"ilmiy, chuqur tahliliy va KATTA HAJMLI (Wordda Times New Roman 14pt, 1.5 intervalda KAMIDA 2-3 TO'LIQ LIST / SAHIFA, "
+        f"ya'ni jami 7 000 dan 9 500 gacha belgi, taxminan 1 100 - 1 500 so'zdan iborat) MUKAMMAL MUSTAQIL ISH yozib ber.\n\n"
+        f"QAT'IY STRUKTURA VA BO'LIMLAR (Har bir bo'lim alohida qatordan aniq sarlavha bilan boshlansin):\n\n"
+        f"KIRISH\n"
+        f"- Mavzuning dolzarbligi va bugungi kundagi ilmiy-amaliy ahamiyati;\n"
+        f"- Tadqiqotning maqsadi va belgilangan asosiy vazifalari;\n"
+        f"- Tadqiqot obyekti va predmeti.\n"
+        f"(Kirish qismi kamida 3-4 ta to'liq, mazmundor xatboshidan iborat bo'lsin, umumiy hajmi ~1 500 belgi).\n\n"
+        f"1-BOB. MAVZUNING NAZARIY-USLUBIY ASOSLARI VA XALQARO TAJRIBA\n"
+        f"- Mavzuga oid asosiy iqtisodiy tushunchalar, qonuniyatlar, modellar va nazariy yondashuvlar;\n"
+        f"- Klassik va zamonaviy iqtisodchi olimlarning ilmiy qarashlari tahlili;\n"
+        f"- Rivojlangan xorijiy davlatlarning ilg'or tajribasi va xalqaro andozalar tahlili.\n"
+        f"(1-bob kamida 4-5 ta chuqur, tahliliy xatboshidan iborat bo'lsin, umumiy hajmi ~2 500 - 3 000 belgi).\n\n"
+        f"2-BOB. O'ZBEKISTON IQTISODIYOTIDAGI AMALIY HOLAT, STATISTIK TAHLIL VA MUAMMOLAR\n"
+        f"- O'zbekiston Respublikasi Prezidenti huzuridagi Statistika agentligi (stat.uz) va Markaziy bank (cbu.uz) rasmiy ma'lumotlari asosidagi real ko'rsatkichlar;\n"
+        f"- YaIM hajmi, so'nggi yillardagi o'sish sur'atlari, investitsiyalar, tarmoqlar dinamikasi, inflyatsiya va real iqtisodiy raqamlar tahlili;\n"
+        f"- «O'zbekiston – 2030» strategiyasi doirasida sohada amalga oshirilayotgan tub islohotlar, davlat dasturlari va tizimli o'zgarishlar;\n"
+        f"- Bugungi kunda sohada mavjud bo'lgan amaliy muammolar, kamchiliklar va ularning sabablari tahlili.\n"
+        f"(2-bob kamida 4-5 ta boy statistik va tahliliy xatboshidan iborat bo'lsin, umumiy hajmi ~2 500 - 3 000 belgi).\n\n"
+        f"XULOSA VA TAKLIFLAR\n"
+        f"- Tadqiqot va tahlil natijalari bo'yicha tizimli ilmiy xulosalar;\n"
+        f"- O'zbekiston iqtisodiyoti amaliyotiga tatbiq etish, samaradorlikni oshirish va mavjud muammolarni bartaraf etish bo'yicha 4-5 ta aniq, asoslangan amaliy tavsiya va takliflar.\n"
+        f"(Ushbu xulosa qismi kamida 3-4 ta to'liq xatboshidan iborat bo'lsin, umumiy hajmi ~1 500 belgi).\n\n"
+        f"QAT'IY CHEKLOV VA TALABLAR:\n"
+        f"1. 🚫 MATN OXIRIDA ADABIYOTLAR RO'YXATI YOKI FOYDALANILGAN MANBALARNI YOZISH QAT'IYAN TAQIQLANADI! (Hech qanday 'Foydalanilgan adabiyotlar' yoki 'References' bo'limi kiritilmasin, hujjat faqat XULOSA VA TAKLIFLAR bilan yakunlansin!).\n"
+        f"2. 🚫 Matnni qisqartirish, chala qoldirish yoki qisqa 2-3 xatboshi bilan cheklanish qat'iyan taqiqlanadi! Har bir bo'lim to'liq, mukammal va keng bayon etilishi shart (kamida 2-3 sahifalik to'liq matn).\n"
+        f"3. 🚫 Hech qanday markdown panjara (#, ##, ###) yoki yulduzchalar (**) ishlatilmasin. Sarlavhalar faqat katta harflarda (KIRISH, 1-BOB..., 2-BOB..., XULOSA VA TAKLIFLAR) toza matn sifatida yozilsin.\n"
+        f"4. 🚫 Ortiqcha kirish so'zlari, salomlashish yoki 'Marhamat, tayyor' kabi jumlalar mutlaqo yozilmasin. To'g'ridan-to'g'ri 'KIRISH' sarlavhasi bilan boshlansin.\n\n"
+        f"Til: {lang_name}."
     )
     return prompt

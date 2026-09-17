@@ -294,4 +294,35 @@ class DatabaseManager:
         data["users"][uid]["student_profile"] = current
         self._save_local(data)
 
+    async def save_last_essay_info(self, user_id: int, subject: str, topic: str, essay_text: str) -> None:
+        """Cache last generated essay details in MongoDB or local storage for resilient retrieval."""
+        doc = {
+            "last_subject": subject,
+            "last_topic": topic,
+            "last_essay": essay_text,
+            "last_updated": datetime.now().isoformat()
+        }
+        if self.is_connected and self.users_col is not None:
+            try:
+                await self.users_col.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"last_essay_info": doc}},
+                    upsert=True
+                )
+                return
+            except Exception as e:
+                logger.error(f"Error saving last essay info in DB: {e}")
+
+        data = self._load_local()
+        uid = str(user_id)
+        if uid not in data.get("users", {}):
+            data["users"][uid] = {}
+        data["users"][uid]["last_essay_info"] = doc
+        self._save_local(data)
+
+    async def get_last_essay_info(self, user_id: int) -> Dict[str, str]:
+        """Retrieve last generated essay info for user (survives restarts)."""
+        user = await self.get_user(user_id) or {}
+        return user.get("last_essay_info", {})
+
 db = DatabaseManager()

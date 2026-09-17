@@ -336,45 +336,87 @@ async def request_ai_content(prompt: str) -> str:
         raise last_exception
     return "Xatolik."
 
-async def generate_essay(message: types.Message, subject: str, topic: str, wait_msg: Optional[types.Message] = None) -> None:
-    user_id = message.from_user.id if message.from_user else 0
+def split_text_into_telegram_chunks(text: str, max_len: int = 3800) -> List[str]:
+    """Split long essay text cleanly by double or single newlines without cutting words or sentences."""
+    if len(text) <= max_len:
+        return [text]
+
+    chunks: List[str] = []
+    paragraphs = text.split("\n\n")
+    current_chunk = ""
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        if len(current_chunk) + len(para) + 2 <= max_len:
+            current_chunk = f"{current_chunk}\n\n{para}" if current_chunk else para
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            if len(para) > max_len:
+                lines = para.split("\n")
+                sub_chunk = ""
+                for line in lines:
+                    if len(sub_chunk) + len(line) + 1 <= max_len:
+                        sub_chunk = f"{sub_chunk}\n{line}" if sub_chunk else line
+                    else:
+                        if sub_chunk:
+                            chunks.append(sub_chunk)
+                        sub_chunk = line
+                if sub_chunk:
+                    current_chunk = sub_chunk
+            else:
+                current_chunk = para
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks or [text]
+
+async def generate_essay(
+    message: types.Message,
+    subject: str,
+    topic: str,
+    wait_msg: Optional[types.Message] = None,
+    user_id: Optional[int] = None
+) -> None:
+    target_user_id = user_id or (message.from_user.id if message.from_user else message.chat.id)
     if not API_KEYS:
         await message.answer("⚠️ Sun'iy Intelekt qismi (Brain) ulanmagan. Iltimos, ma'muriyatga xabar bering.")
         return
         
     if wait_msg is None:
         wait_msg = await message.answer(
-            f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida qisqa va lo'nda mustaqil ish tayyorlanmoqda...",
+            f"⏳ *{subject}* bo'yicha *\"{topic}\"* mavzusida to'liq hajmli, rasmiy OTM standarti bo'yicha mustaqil ish tayyorlanmoqda...\n"
+            f"_(Kirish, 1-bob, 2-bob tahlili, rasmiy statistika va xulosa)_",
             parse_mode="Markdown"
         )
     
-    lang = await db.get_user_language(user_id) if user_id else "uz"
+    lang = await db.get_user_language(target_user_id) if target_user_id else "uz"
     prompt = build_academic_essay_prompt(subject_title=subject, topic=topic, lang=lang)
     
     try:
         text = await request_ai_content(prompt)
         
-        if user_id:
-            last_generated_essays[user_id] = text
-            last_generated_topics[user_id] = topic
-            last_generated_subjects[user_id] = subject
-        
-        if message.from_user:
+        if target_user_id:
+            last_generated_essays[target_user_id] = text
+            last_generated_topics[target_user_id] = topic
+            last_generated_subjects[target_user_id] = subject
+            await db.save_last_essay_info(target_user_id, subject, topic, text)
             await db.log_request(
-                user_id=message.from_user.id,
+                user_id=target_user_id,
                 subject=subject,
                 topic=topic
             )
         
-        if len(text) > 4000:
-            parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
-            for p_idx, part in enumerate(parts):
-                if p_idx == len(parts) - 1:
-                    await message.answer(part, reply_markup=get_essay_action_menu(user_id))
-                else:
-                    await message.answer(part)
-        else:
-            await message.answer(text, reply_markup=get_essay_action_menu(user_id))
+        chunks = split_text_into_telegram_chunks(text, max_len=3800)
+        for p_idx, part in enumerate(chunks):
+            if p_idx == len(chunks) - 1:
+                await message.answer(part, reply_markup=get_essay_action_menu(target_user_id))
+            else:
+                await message.answer(part)
             
         if wait_msg:
             try:
@@ -395,16 +437,22 @@ async def generate_essay(message: types.Message, subject: str, topic: str, wait_
         try:
             await asyncio.sleep(1.5)
             retry_text = await request_ai_content(prompt)
-            if user_id:
-                last_generated_essays[user_id] = retry_text
-                last_generated_topics[user_id] = topic
-                last_generated_subjects[user_id] = subject
+            if target_user_id:
+                last_generated_essays[target_user_id] = retry_text
+                last_generated_topics[target_user_id] = topic
+                last_generated_subjects[target_user_id] = subject
+                await db.save_last_essay_info(target_user_id, subject, topic, retry_text)
             if wait_msg:
                 try:
                     await wait_msg.delete()
                 except Exception:
                     pass
-            await message.answer(retry_text, reply_markup=get_essay_action_menu(user_id))
+            retry_chunks = split_text_into_telegram_chunks(retry_text, max_len=3800)
+            for p_idx, part in enumerate(retry_chunks):
+                if p_idx == len(retry_chunks) - 1:
+                    await message.answer(part, reply_markup=get_essay_action_menu(target_user_id))
+                else:
+                    await message.answer(part)
             return
         except Exception as retry_e:
             logger.error(f"Retry failed: {retry_e}")
@@ -740,7 +788,8 @@ async def tts_callback_handler(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("docx_download_"))
 async def docx_download_callback_handler(callback: types.CallbackQuery):
     uid = int(callback.data.replace("docx_download_", ""))
-    essay_text = last_generated_essays.get(uid)
+    cached_info = await db.get_last_essay_info(uid)
+    essay_text = last_generated_essays.get(uid) or cached_info.get("last_essay")
     
     # Fallback: Agar bot qayta ishga tushib xotira tozalangan bo'lsa, xabar matnidan olamiz
     if not essay_text and callback.message and callback.message.text:
@@ -759,8 +808,8 @@ async def docx_download_callback_handler(callback: types.CallbackQuery):
 
     try:
         profile = await db.get_student_profile(uid)
-        topic = last_generated_topics.get(uid, "Mustaqil ish")
-        subject = last_generated_subjects.get(uid, "Iqtisodiyot")
+        topic = last_generated_topics.get(uid) or cached_info.get("last_topic") or "Mustaqil ish"
+        subject = last_generated_subjects.get(uid) or cached_info.get("last_subject") or "Iqtisodiyot"
 
         title_info = TitlePageInfo(
             university=profile.get("university", "Toshkent davlat iqtisodiyot universiteti"),
@@ -775,7 +824,7 @@ async def docx_download_callback_handler(callback: types.CallbackQuery):
             year=profile.get("year", str(datetime.now().year))
         )
 
-        doc_data = AcademicEssayParser.parse_essay_to_document(essay_text, title_info)
+        doc_data = AcademicEssayParser.parse_essay_to_document(essay_text, title_info, include_references=False)
         builder = MustaqilIshDocxBuilder()
         docx_bytes = builder.generate_docx(doc_data)
 
@@ -1159,7 +1208,7 @@ async def topic_picked_handler(callback: types.CallbackQuery, state: FSMContext)
         topic = topics[idx]
         subj_title = subj_info["title"]
         await callback.answer(f"Tanlandi: {topic[:30]}...")
-        await generate_essay(callback.message, subj_title, topic)
+        await generate_essay(callback.message, subj_title, topic, user_id=callback.from_user.id)
     else:
         await callback.answer("⚠️ Mavzu topilmadi.")
 
@@ -1217,7 +1266,7 @@ async def custom_topic_message_handler(message: types.Message, state: FSMContext
         await message.answer("Iltimos, mavzuni matn ko'rinishida kiriting.")
         return
         
-    await generate_essay(message, subj_title, topic)
+    await generate_essay(message, subj_title, topic, user_id=message.from_user.id if message.from_user else 0)
 
 @dp.message(BotStates.in_custom_essay_mode, F.photo)
 async def custom_topic_photo_handler(message: types.Message, state: FSMContext, bot: Bot) -> None:
@@ -1235,11 +1284,11 @@ async def custom_topic_photo_handler(message: types.Message, state: FSMContext, 
         try:
             await wait_msg.edit_text(
                 f"🎯 Rasm ichidan aniqlangan mavzu:\n«{clean_topic}»\n\n"
-                f"⏳ Ushbu mavzu bo'yicha {subj_title} fanidan qisqa va lo'nda mustaqil ish tayyorlanmoqda..."
+                f"⏳ Ushbu mavzu bo'yicha {subj_title} fanidan to'liq hajmli rasmiy mustaqil ish tayyorlanmoqda..."
             )
         except Exception:
             pass
-        await generate_essay(message, subj_title, clean_topic, wait_msg=wait_msg)
+        await generate_essay(message, subj_title, clean_topic, wait_msg=wait_msg, user_id=uid)
         await state.clear()
     else:
         try:

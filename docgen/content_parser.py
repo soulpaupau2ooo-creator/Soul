@@ -19,14 +19,15 @@ class AcademicEssayParser:
     def parse_essay_to_document(
         raw_text: str,
         title_info: TitlePageInfo,
+        include_references: bool = False,
     ) -> MustaqilIshDocument:
         """
         Transform raw text into structured MustaqilIshDocument.
         Extracts:
         - Kirish
-        - Asosiy qism (Chapters / Headings)
-        - Xulosa
-        - Foydalanilgan adabiyotlar ro'yxati
+        - Asosiy qism (1-bob, 2-bob, subsections)
+        - Xulosa va takliflar
+        - Optional references (disabled by default per user requirement)
         """
         lines = [line.strip() for line in raw_text.split("\n")]
         sections: List[SectionItem] = []
@@ -40,18 +41,22 @@ class AcademicEssayParser:
         # Regular expressions for section boundaries
         heading_patterns = [
             (r"^(?:#+\s*)?(?:kirish|введение|introduction)\b", "KIRISH", True, False),
-            (r"^(?:#+\s*)?(?:xulosa|хулоса|заключение|conclusion)\b", "XULOSA", True, True),
-            (r"^(?:#+\s*)?(?:foydalanilgan\s+adabiyotlar|adabiyotlar\s+ro['ʻ`]?yxati|список\s+литературы|references)\b", "FOYDALANILGAN ADABIYOTLAR RO'YXATI", True, True),
+            (r"^(?:#+\s*)?(?:xulosa\s+va\s+takliflar|xulosa\s+va\s+tavsiyalar|xulosa|хулоса|заключение|conclusion)\b", "XULOSA VA TAKLIFLAR", True, True),
             (r"^(?:#+\s*)?(\d+[-.]\s*(?:bob|bo['ʻ`]?lim|fasl|bob:|bo['ʻ`]?lim:)?\s*[^:\n]+)", None, True, True),
             (r"^(?:#+\s*)?(\d+\.\d+[-.]?\s*[^:\n]+)", None, False, False),
         ]
+
+        if include_references:
+            heading_patterns.append(
+                (r"^(?:#+\s*)?(?:foydalanilgan\s+adabiyotlar|adabiyotlar\s+ro['ʻ`]?yxati|список\s+литературы|references)\b", "FOYDALANILGAN ADABIYOTLAR RO'YXATI", True, True)
+            )
 
         for line in lines:
             if not line:
                 continue
 
-            # Check if entering references block
-            if re.search(r"^(?:#+\s*)?(?:foydalanilgan\s+adabiyotlar|adabiyotlar\s+ro['ʻ`]?yxati|список\s+литературы)\b", line, re.IGNORECASE):
+            # Check if entering references block (only if include_references is True)
+            if include_references and re.search(r"^(?:#+\s*)?(?:foydalanilgan\s+adabiyotlar|adabiyotlar\s+ro['ʻ`]?yxati|список\s+литературы)\b", line, re.IGNORECASE):
                 if current_paragraphs:
                     sections.append(SectionItem(
                         title=current_title,
@@ -63,15 +68,22 @@ class AcademicEssayParser:
                 in_references = True
                 continue
 
+            # If references are disabled, ignore any references section entirely
+            if not include_references and re.search(r"^(?:#+\s*)?(?:foydalanilgan\s+adabiyotlar|adabiyotlar\s+ro['ʻ`]?yxati|список\s+литературы|references)\b", line, re.IGNORECASE):
+                in_references = True
+                continue
+
             if in_references:
-                # Numbered list items in references
-                if re.match(r"^(\d+[\.\)]|\-|\*)\s+", line):
-                    clean_ref = re.sub(r"^(\d+[\.\)]|\-|\*)\s+", "", line)
-                    if clean_ref:
-                        references.append(clean_ref)
-                else:
-                    if line and len(line) > 5:
-                        references.append(line)
+                if include_references:
+                    # Numbered list items in references
+                    if re.match(r"^(\d+[\.\)]|\-|\*)\s+", line):
+                        clean_ref = re.sub(r"^(\d+[\.\)]|\-|\*)\s+", "", line)
+                        if clean_ref:
+                            references.append(clean_ref)
+                    else:
+                        if line and len(line) > 5:
+                            references.append(line)
+                # If not include_references, skip reference lines
                 continue
 
             # Check for standard headings
@@ -114,17 +126,7 @@ class AcademicEssayParser:
                 page_break_before=(current_title != "KIRISH")
             ))
 
-        # If references were empty, generate default academic reference templates
-        if not references:
-            references = [
-                "O'zbekiston Respublikasi Prezidentining 2023-yil 11-sentabrdagi PF-158-son Farmoni «O'zbekiston -- 2030» strategiyasi to'g'risida.",
-                "Mirziyoyev Sh.M. Yangi O'zbekiston taraqqiyot strategiyasi. -- Toshkent: O'zbekiston nashriyoti, 2022.",
-                "O'zbekiston Respublikasi Prezidenti huzuridagi Statistika agentligi rasmiy portali. -- https://stat.uz.",
-                "O'zbekiston Respublikasi Markaziy banki axborotnomasi va statistik byulleteni. -- https://cbu.uz.",
-                "Iqtisodiyot nazariyasi / Darslik. Prof. Sh. Shodmonov tahriri ostida. -- Toshkent: Iqtisod-Moliya, 2021. -- 420 b."
-            ]
-
-        # Ensure at least KIRISH and XULOSA exist
+        # Ensure at least KIRISH exists
         has_intro = any("kirish" in s.title.lower() for s in sections)
         if not has_intro and sections:
             sections[0].title = "KIRISH"
@@ -132,5 +134,5 @@ class AcademicEssayParser:
         return MustaqilIshDocument(
             title_info=title_info,
             sections=sections,
-            references=references
+            references=references if include_references else []
         )
