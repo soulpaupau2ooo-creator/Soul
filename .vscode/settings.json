@@ -2,5 +2,8 @@
     "git.path": "C:\\Users\\Azizbek\\AppData\\Local\\Programs\\Git\\cmd\\git.exe",
     "git.enabled": true,
     "git.autorefresh": true,
-    "git.autoRepositoryDetection": true
+    "git.autoRepositoryDetection": true,
+    "python.defaultInterpreterPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+    "python.terminal.activateEnvironment": true,
+    "terminal.integrated.defaultProfile.windows": "PowerShell"
 }

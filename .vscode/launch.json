@@ -1,0 +1,34 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Soulbekbot (Local Polling)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/bot.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "USE_WEBHOOK": "false"
+            }
+        },
+        {
+            "name": "Python: Run All Unit Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "unittest",
+            "args": [
+                "discover",
+                "tests"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: Check Bot & Render Status",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/check_status.py",
+            "console": "integratedTerminal"
+        }
+    ]
+}
