@@ -24,8 +24,15 @@ import re
 import time
 from typing import Dict, List, Optional, Tuple
 
-import edge_tts
-from gtts import gTTS
+try:
+    import edge_tts
+except ImportError:  # pragma: no cover - optional dependency for runtime-only TTS
+    edge_tts = None
+
+try:
+    from gtts import gTTS
+except ImportError:  # pragma: no cover - optional dependency for runtime-only TTS
+    gTTS = None
 
 from tts.audio_post import post_process_audio
 from tts.uzbek_normalizer import UzbekTextNormalizer
@@ -65,7 +72,7 @@ class EdgeTTSProvider(BaseTTSProvider):
     """Primary asynchronous speech synthesis adapter powered by Microsoft Azure Neural voices."""
 
     async def synthesize(self, text: str, voice: str, rate: str = "+0%") -> Optional[bytes]:
-        if not text or not text.strip():
+        if not text or not text.strip() or edge_tts is None:
             return None
 
         try:
@@ -89,7 +96,7 @@ class GTTSFallbackProvider(BaseTTSProvider):
     """Emergency fallback provider when neural services are completely unreachable."""
 
     async def synthesize(self, text: str, voice: str, rate: str = "+0%") -> Optional[bytes]:
-        if not text or not text.strip():
+        if not text or not text.strip() or gTTS is None:
             return None
 
         try:
